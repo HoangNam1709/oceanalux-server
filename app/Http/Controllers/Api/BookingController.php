@@ -9,6 +9,7 @@ use Illuminate\Support\Str;
 use App\Models\CabinClass;
 use App\Models\Booking;
 use App\Models\BookingDetail;
+use App\Events\RoomReleased; // THÊM DÒNG NÀY ĐỂ MANG CÁI "LOA" VÀO
 
 class BookingController extends Controller
 {
@@ -34,6 +35,7 @@ class BookingController extends Controller
                 ], 400);
             }
 
+            // Trừ số lượng phòng trong DB
             $cabin->available_rooms -= $request->quantity;
             $cabin->save();
 
@@ -57,7 +59,12 @@ class BookingController extends Controller
                 'price' => $cabin->price
             ]);
 
+            // Chốt giao dịch lưu vào DB
             DB::commit();
+
+            // THÊM DÒNG NÀY: Ngay khi lưu thành công, cầm loa hét lên cho tất cả cùng biết!
+            // React sẽ nghe thấy và tự động trừ đi số phòng trên màn hình
+            broadcast(new RoomReleased($cabin->id, $cabin->available_rooms));
 
             return response()->json([
                 'status' => 'success',
