@@ -85,4 +85,17 @@ class BookingController extends Controller
             ], 500);
         }
     }
+    public function myBookings()
+{
+    // Lấy tất cả đơn hàng của User đang đăng nhập, join kèm theo lịch trình, tàu, và chi tiết hạng phòng
+    $bookings = Booking::with(['schedule.cruise.images', 'details.cabinClass'])
+        ->where('user_id', auth()->id())
+        ->orderBy('created_at', 'desc')
+        ->get();
+
+    return response()->json([
+        'status' => 'success',
+        'data' => $bookings
+    ]);
+}
 }
