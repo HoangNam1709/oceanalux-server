@@ -13,7 +13,10 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware): void {
-        //
+        $middleware->validateCsrfTokens(except: [
+            '/payment/vnpay/ipn', // Đường dẫn IPN của VNPay
+            // '/stripe/*',       // thêm các cổng thanh toán khác sau này
+        ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         //
