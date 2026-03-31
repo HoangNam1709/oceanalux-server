@@ -20,3 +20,4 @@ Route::middleware('auth:sanctum')->group(function () {
     // 2. BẠN CẦN TẠO ROUTE NÀY: Trả về các Booking của user hiện tại
     Route::get('/my-bookings', [BookingController::class, 'myBookings']); 
 });
+Route::get('/bookings/{id}', [BookingController::class, 'show']);

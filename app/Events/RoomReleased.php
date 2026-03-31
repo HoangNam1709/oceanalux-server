@@ -1,5 +1,4 @@
 <?php
-
 namespace App\Events;
 
 use Illuminate\Broadcasting\Channel;
@@ -8,7 +7,7 @@ use Illuminate\Contracts\Broadcasting\ShouldBroadcastNow; // Dùng bản "Now" �
 use Illuminate\Foundation\Events\Dispatchable;
 use Illuminate\Queue\SerializesModels;
 
-// Sửa ShouldBroadcast thành ShouldBroadcastNow để không cần chạy queue:work
+
 class RoomReleased implements ShouldBroadcastNow
 {
     use Dispatchable, InteractsWithSockets, SerializesModels;

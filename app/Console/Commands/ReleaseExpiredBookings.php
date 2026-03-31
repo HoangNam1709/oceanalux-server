@@ -1,12 +1,12 @@
 <?php
-
 namespace App\Console\Commands;
 
 use Illuminate\Console\Command;
 use App\Models\Booking;
 use App\Events\RoomReleased; 
-use App\Events\BookingUpdated;
+use App\Events\BookingExpired; // Bắt buộc dùng Event này để đuổi khách
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 
 class ReleaseExpiredBookings extends Command
 {
@@ -23,34 +23,43 @@ class ReleaseExpiredBookings extends Command
 
         if ($expiredBookings->isEmpty()) {
             $this->info("Không có đơn hàng nào hết hạn.");
-            return 0;
+            return Command::SUCCESS;
         }
+
+        $this->info("Tìm thấy " . $expiredBookings->count() . " đơn hàng hết hạn. Bắt đầu dọn dẹp...");
 
         foreach ($expiredBookings as $booking) {
-            DB::transaction(function () use ($booking) {
-                // 2. Duyệt qua chi tiết đơn hàng để hoàn trả số lượng phòng
-                foreach ($booking->details as $detail) {
-                    $cabin = $detail->cabinClass;
-                    if ($cabin) {
-                        // Cộng lại số phòng vào Database
-                        $cabin->increment('available_rooms', $detail->quantity);
-                        
-                        // 3. PHÁT TÍN HIỆU: Cập nhật số phòng trống cho Trang Chủ
-                        broadcast(new RoomReleased($cabin->id, $cabin->available_rooms));
+            // Dùng Try-Catch để nếu 1 đơn bị lỗi, Robot vẫn chạy tiếp các đơn khác
+            try {
+                DB::transaction(function () use ($booking) {
+                    
+                    // 2. Hoàn trả số lượng phòng
+                    foreach ($booking->details as $detail) {
+                        $cabin = $detail->cabinClass;
+                        if ($cabin) {
+                            $cabin->increment('available_rooms', $detail->quantity);
+                            
+                            // Phát tín hiệu: Cập nhật số phòng trống cho người khác mua
+                            broadcast(new RoomReleased($cabin->id, $cabin->available_rooms));
+                        }
                     }
-                }
 
-                // 4. Cập nhật trạng thái đơn hàng thành 'cancelled'
-                $booking->update(['status' => 'cancelled']);
-                
-                // 5. PHÁT TÍN HIỆU: Thông báo cho trang Checkout đơn hàng này đã chết
-                // Đổi event(...) thành broadcast(...) để chắc chắn bay lên Websocket
-                broadcast(new BookingUpdated($booking->id, $booking->hold_expires_at, 'cancelled'));
-                
-                $this->info("Đã giải phóng phòng cho mã đơn: {$booking->booking_code}");
-            });
+                    // 3. Cập nhật trạng thái đơn hàng thành 'cancelled'
+                    $booking->update(['status' => 'cancelled']);
+                    
+                    // 4. PHÁT TÍN HIỆU: Cầm loa đuổi thẳng cổ khách hàng khỏi trang Checkout!
+                    broadcast(new BookingExpired($booking->id));
+                });
+
+                $this->info("Đã giải phóng và phát cảnh báo đuổi khách cho mã đơn: {$booking->booking_code}");
+
+            } catch (\Exception $e) {
+                // Ghi log nếu có lỗi xảy ra để truy vết
+                $this->error("Lỗi khi giải phóng đơn {$booking->booking_code}: " . $e->getMessage());
+                Log::error("Lỗi Robot Dọn Phòng [{$booking->booking_code}]: " . $e->getMessage());
+            }
         }
 
-        return 0;
+        return Command::SUCCESS;
     }
 }

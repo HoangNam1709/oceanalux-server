@@ -57,7 +57,7 @@ class AuthController extends Controller
         'phone' => $request->phone,
     ]);
 
-    // 3. Tạo Token để khách đăng ký xong là đăng nhập luôn (Trải nghiệm người dùng tốt hơn)
+    // 3. Tạo Token để khách đăng ký xong là đăng nhập luôn 
     $token = $user->createToken('auth_token')->plainTextToken;
 
     return response()->json([

@@ -9,7 +9,7 @@ use Illuminate\Support\Str;
 use App\Models\CabinClass;
 use App\Models\Booking;
 use App\Models\BookingDetail;
-use App\Events\RoomReleased; // THÊM DÒNG NÀY ĐỂ MANG CÁI "LOA" VÀO
+use App\Events\RoomReleased; 
 
 class BookingController extends Controller
 {
@@ -51,7 +51,7 @@ class BookingController extends Controller
                 'customer_name' => $request->customer_name ?? 'Khách Hàng',
                 'customer_email' => $request->customer_email ?? 'khach@gmail.com',
             ]);
-
+            $remainingSeconds = now()->diffInSeconds($booking->hold_expires_at, false);
             BookingDetail::create([
                 'booking_id' => $booking->id,
                 'cabin_class_id' => $cabin->id,
@@ -62,7 +62,7 @@ class BookingController extends Controller
             // Chốt giao dịch lưu vào DB
             DB::commit();
 
-            // THÊM DÒNG NÀY: Ngay khi lưu thành công, cầm loa hét lên cho tất cả cùng biết!
+            // Ngay khi lưu thành công, cầm loa hét lên cho tất cả cùng biết!
             // React sẽ nghe thấy và tự động trừ đi số phòng trên màn hình
             broadcast(new RoomReleased($cabin->id, $cabin->available_rooms));
 
@@ -72,7 +72,8 @@ class BookingController extends Controller
                 'data' => [
                     'booking_id' => $booking->id,
                     'booking_code' => $booking->booking_code,
-                    'hold_expires_at' => $booking->hold_expires_at
+                    'hold_expires_at' => $booking->hold_expires_at,
+                    'remaining_seconds' => $remainingSeconds > 0 ? (int)$remainingSeconds : 0 // Trả về số giây còn lại, nếu đã hết hạn thì trả về 0    
                 ]
             ]);
 
@@ -96,6 +97,21 @@ class BookingController extends Controller
     return response()->json([
         'status' => 'success',
         'data' => $bookings
+    ]);
+}
+public function show($id)
+{
+    $booking = Booking::findOrFail($id);
+    
+    return response()->json([
+        'status' => 'success',
+        'data' => [
+            'id' => $booking->id,
+            'status' => $booking->status,
+            'remaining_seconds' => now()->diffInSeconds($booking->hold_expires_at, false) > 0 
+                                   ? now()->diffInSeconds($booking->hold_expires_at, false) 
+                                   : 0
+        ]
     ]);
 }
 }
