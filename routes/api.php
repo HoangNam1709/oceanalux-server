@@ -26,3 +26,4 @@ Route::get('/bookings/{id}', [BookingController::class, 'show']);
 
 // Đảm bảo route nằm trong group api hoặc định nghĩa trực tiếp như sau:
 Route::post('/payment/create', [PaymentController::class, 'createPayment']);
+Route::get('/payment/vnpay-ipn', [PaymentController::class, 'vnpayIpn']);
