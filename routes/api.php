@@ -1,29 +1,54 @@
 <?php
 
+use Illuminate\Http\Request; 
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Api\CruiseController;
 use App\Http\Controllers\Api\BookingController;
 use App\Http\Controllers\Api\PaymentController;
 use App\Http\Controllers\Api\AuthController;
-// Khi ReactJS gọi tới /api/cruises, nó sẽ chạy vào hàm index của CruiseController
-Route::get('/cruises', [CruiseController::class, 'index']);
-Route::get('/cruises/{id}', [CruiseController::class, 'show']);
-Route::middleware('auth:sanctum')->group(function () {
-    Route::post('/bookings/hold', [BookingController::class, 'holdRoom']);
-});
+
+/*
+|--------------------------------------------------------------------------
+| CÁC ROUTE PUBLIC (KHÔNG CẦN ĐĂNG NHẬP)
+|--------------------------------------------------------------------------
+| Ai cũng có thể truy cập để xem tàu, đăng ký, đăng nhập và Webhook VNPAY
+*/
 Route::post('/login', [AuthController::class, 'login']);
 Route::post('/register', [AuthController::class, 'register']);
-Route::middleware('auth:sanctum')->group(function () {
-    // 1. Route lấy thông tin User (Mặc định Laravel đã có)
-    Route::get('/user', function (Request $request) {
-        return $request->user();
-    });
 
-    // 2. BẠN CẦN TẠO ROUTE NÀY: Trả về các Booking của user hiện tại
-    Route::get('/my-bookings', [BookingController::class, 'myBookings']); 
-});
-Route::get('/bookings/{id}', [BookingController::class, 'show']);
+Route::get('/cruises', [CruiseController::class, 'index']);
+Route::get('/cruises/{id}', [CruiseController::class, 'show']);
 
-// Đảm bảo route nằm trong group api hoặc định nghĩa trực tiếp như sau:
-Route::post('/payment/create', [PaymentController::class, 'createPayment']);
+// VNPAY IPN (Bắt buộc phải Public để Server VNPay có thể gửi kết quả về)
 Route::get('/payment/vnpay-ipn', [PaymentController::class, 'vnpayIpn']);
+
+/*
+|--------------------------------------------------------------------------
+| CÁC ROUTE PROTECTED (BẮT BUỘC ĐĂNG NHẬP BẰNG TOKEN)
+|--------------------------------------------------------------------------
+| Phải có Token hợp lệ trên Header mới được phép đi qua cửa này
+*/
+Route::middleware('auth:sanctum')->group(function () {
+    
+    // --- QUẢN LÝ TÀI KHOẢN ---
+    Route::get('/user', function (Request $request) {
+        return response()->json([
+            'status' => 'success',
+            'data' => $request->user()
+        ]);
+    });
+    Route::put('/user/profile', [AuthController::class, 'updateProfile']);
+    Route::post('/logout', [AuthController::class, 'logout']); // Route Đăng xuất an toàn
+
+    // --- QUẢN LÝ ĐẶT PHÒNG ---
+    Route::get('/my-bookings', [BookingController::class, 'myBookings']); 
+    
+    // Đã chuyển vào khu vực bảo mật: Chỉ lấy được đơn hàng của chính mình
+    Route::get('/bookings/{id}', [BookingController::class, 'show']); 
+    
+    Route::post('/bookings/hold', [BookingController::class, 'holdRoom']);
+
+    // --- THANH TOÁN ---
+    // Đã chuyển vào khu vực bảo mật: Chỉ user đang đăng nhập mới được tạo thanh toán
+    Route::post('/payment/create', [PaymentController::class, 'createPayment']);
+});
