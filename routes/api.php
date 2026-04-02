@@ -6,9 +6,11 @@ use App\Http\Controllers\Api\CruiseController;
 use App\Http\Controllers\Api\BookingController;
 use App\Http\Controllers\Api\PaymentController;
 use App\Http\Controllers\Api\AuthController;
+use App\Http\Controllers\Api\AdminController; // Import thêm AdminController
 use App\Models\Booking;
 use Illuminate\Support\Facades\Mail;
 use App\Mail\BookingSuccessMail;
+
 /*
 |--------------------------------------------------------------------------
 | CÁC ROUTE PUBLIC (KHÔNG CẦN ĐĂNG NHẬP)
@@ -23,15 +25,14 @@ Route::get('/cruises/{id}', [CruiseController::class, 'show']);
 
 // VNPAY IPN (Bắt buộc phải Public để Server VNPay có thể gửi kết quả về)
 Route::get('/payment/vnpay-ipn', [PaymentController::class, 'vnpayIpn']);
+
+// Test gửi Mail
 Route::get('/test-mail', function () {
-    // Lấy đại 1 đơn hàng trong DB để test template
     $booking = Booking::with(['schedule.cruise', 'details.cabinClass'])->first();
-    
-    // Gửi đến email thật của bạn (điền email bạn hay dùng để nhận thư)
     Mail::to('hoangnam170924@gmail.com')->send(new BookingSuccessMail($booking));
-    
     return "Xong! Kiểm tra hòm thư của bạn đi.";
 });
+
 /*
 |--------------------------------------------------------------------------
 | CÁC ROUTE PROTECTED (BẮT BUỘC ĐĂNG NHẬP BẰNG TOKEN)
@@ -40,7 +41,9 @@ Route::get('/test-mail', function () {
 */
 Route::middleware('auth:sanctum')->group(function () {
     
-    // --- QUẢN LÝ TÀI KHOẢN ---
+    // ==========================================
+    // KHU VỰC CỦA NGƯỜI DÙNG (USER)
+    // ==========================================
     Route::get('/user', function (Request $request) {
         return response()->json([
             'status' => 'success',
@@ -49,19 +52,40 @@ Route::middleware('auth:sanctum')->group(function () {
     });
     Route::put('/user/profile', [AuthController::class, 'updateProfile']);
     Route::post('/logout', [AuthController::class, 'logout']); // Route Đăng xuất an toàn
-
-    // --- QUẢN LÝ ĐẶT PHÒNG ---
+    
+    // --- Quản lý Đặt phòng của khách ---
     Route::get('/my-bookings', [BookingController::class, 'myBookings']); 
-    
-    // Đã chuyển vào khu vực bảo mật: Chỉ lấy được đơn hàng của chính mình
     Route::get('/bookings/{id}', [BookingController::class, 'show']); 
-    
     Route::post('/bookings/hold', [BookingController::class, 'holdRoom']);
+    Route::post('/bookings/{id}/cancel', [BookingController::class, 'cancelBooking']); // Khách tự hủy đơn
 
-    // --- THANH TOÁN ---
-    // Đã chuyển vào khu vực bảo mật: Chỉ user đang đăng nhập mới được tạo thanh toán
+    // --- Thanh toán ---
     Route::post('/payment/create', [PaymentController::class, 'createPayment']);
-    // API Khách tự hủy đơn
-    Route::post('/bookings/{id}/cancel', [BookingController::class, 'cancelBooking']);
+
+
+    // ==========================================
+    // KHU VỰC CỦA QUẢN TRỊ VIÊN (ADMIN)
+    // ==========================================
+    Route::prefix('admin')->group(function () {
+        // Lấy thống kê tổng quan (Dashboard)
+        Route::get('/dashboard/stats', [AdminController::class, 'getDashboardStats']);
+        
+        // Lấy danh sách toàn bộ đơn đặt vé
+        Route::get('/bookings', [AdminController::class, 'getBookings']);
+        
+        // Lấy danh sách Du thuyền kèm theo Phòng (ĐÃ ĐƯỢC CHUYỂN VÀO ĐÚNG NHÀ)
+        Route::get('/cruises', [AdminController::class, 'getCruises']);
+        Route::post('/cruises', [AdminController::class, 'storeCruise']);
+        Route::put('/cruises/{id}', [AdminController::class, 'updateCruise']); // Cập nhật
+        Route::delete('/cruises/{id}', [AdminController::class, 'deleteCruise']); // Xóa
+        Route::post('/cabins', [AdminController::class, 'storeCabin']);       // Thêm mới
+        Route::put('/cabins/{id}', [AdminController::class, 'updateCabin']);  // Cập nhật
+        Route::delete('/cabins/{id}', [AdminController::class, 'deleteCabin']); // Xóa
+        // API Quản lý Tài khoản
+        Route::get('/accounts', [AdminController::class, 'getAccounts']);
+        Route::post('/accounts', [AdminController::class, 'storeAccount']);
+        Route::put('/accounts/{id}', [AdminController::class, 'updateAccount']);
+        Route::delete('/accounts/{id}', [AdminController::class, 'deleteAccount']);
+    });
     
 });
