@@ -6,6 +6,8 @@ use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use App\Models\Booking;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Mail;
+use App\Mail\BookingSuccessMail;
 
 class PaymentController extends Controller
 {
@@ -14,10 +16,7 @@ class PaymentController extends Controller
     private $vnp_HashSecret = "S6RMKH4YKVVV9FY9LI4LICUGW9I50NMO";
     private $vnp_Url = "https://sandbox.vnpayment.vn/paymentv2/vpcpay.html";
     private $vnp_Returnurl = "http://localhost:5173/payment-result"; 
-
-    /**
-     * BƯỚC 1: TẠO REQUEST THANH TOÁN
-     */
+     //BƯỚC 1: TẠO REQUEST THANH TOÁN
     public function createPayment(Request $request)
     {
         $bookingId = $request->input('booking_id');
@@ -37,17 +36,15 @@ class PaymentController extends Controller
             return response()->json(['message' => 'Đơn hàng không tồn tại hoặc đã bị xử lý'], 404);
         }
 
-        // 👉 CHỐNG HACK 1: KIỂM TRA THỜI HẠN (CỰC KỲ QUAN TRỌNG)
-        // Nếu hold_expires_at nhỏ hơn thời gian hiện tại => Tức là đã hết hạn
+        // KIỂM TRA THỜI HẠN 
         if ($booking->hold_expires_at && now()->greaterThan($booking->hold_expires_at)) {
-            // Đổi trạng thái thành cancelled nếu nó đang là holding
             if ($booking->status === 'holding') {
                 $booking->update(['status' => 'cancelled']);
             }
             return response()->json(['message' => 'Đơn hàng đã quá hạn giữ chỗ! Vui lòng đặt lại.'], 400);
         }
 
-        // Cập nhật số tiền từ React (bao gồm Addons + Thuế)
+        // Cập nhật số tiền từ React
         if ($frontendAmount && $frontendAmount > $booking->total_price) {
             $booking->update([
                 'total_price' => $frontendAmount
@@ -55,13 +52,11 @@ class PaymentController extends Controller
             $booking = $booking->fresh(); 
         }
 
-        // 👉 CHỐNG HACK 2: KIỂM TRA SỐ TIỀN HỢP LỆ
+        // KIỂM TRA SỐ TIỀN HỢP LỆ
         if ($booking->total_price <= 0) {
             return response()->json(['message' => 'Số tiền thanh toán không hợp lệ.'], 400);
         }
 
-        // Xử lý thanh toán tiền mặt (Test Mode)
-        // ... (Phần còn lại của code giữ nguyên)
         // FIX 2: Nối đuôi timestamp để tránh VNPAY báo lỗi trùng mã giao dịch (Error.html)
         $vnp_TxnRef = $booking->booking_code . '_' . time();
         $vnp_OrderInfo = "Thanh_toan_don_hang_" . $booking->booking_code; 
@@ -89,7 +84,7 @@ class PaymentController extends Controller
             "vnp_OrderInfo" => $vnp_OrderInfo,
             "vnp_OrderType" => $vnp_OrderType,
             "vnp_ReturnUrl" => $this->vnp_Returnurl,
-            "vnp_TxnRef" => $vnp_TxnRef // Đã truyền đúng biến có nối đuôi time()
+            "vnp_TxnRef" => $vnp_TxnRef 
         );
 
         ksort($inputData);
@@ -121,15 +116,12 @@ class PaymentController extends Controller
             'checkoutUrl' => $vnp_Url
         ]);
     }
-
-    /**
-     * BƯỚC 2: IPN WEBHOOK (Cập nhật Database ngầm)
-     */
+     //BƯỚC 2: IPN WEBHOOK (Cập nhật Database ngầm)
     public function vnpayIpn(Request $request)
     {
         $inputData = [];
         
-        // BẢO MẬT 1: Lọc rác. Chỉ lấy đúng các tham số do VNPAY gửi đến
+        // BẢO MẬT 1: Lọc rác
         foreach ($request->all() as $key => $value) {
             if (substr($key, 0, 4) == "vnp_") {
                 $inputData[$key] = $value;
@@ -151,16 +143,14 @@ class PaymentController extends Controller
                 $i = 1;
             }
         }
-
         $cleanSecret = trim($this->vnp_HashSecret);
         $secureHash = hash_hmac('sha512', $hashData, $cleanSecret);
         
         try {
-            // BẢO MẬT 2: Dùng hash_equals để chống Hacker Timing Attack
+            // BẢO MẬT 2: Dùng hash_equals
             if (hash_equals($secureHash, $vnp_SecureHash)) {
                 
                 $vnp_TxnRef = $inputData['vnp_TxnRef'];
-                // Tách phần đuôi thời gian ra để lấy lại đúng Mã Đơn Hàng ban đầu
                 $realBookingCode = explode('_', $vnp_TxnRef)[0]; 
                 
                 $booking = Booking::where('booking_code', $realBookingCode)->first();
@@ -178,10 +168,21 @@ class PaymentController extends Controller
                                     'payment_method' => 'vnpay',
                                     'transaction_id' => $inputData['vnp_TransactionNo']
                                 ]);
+
+                                // 👉 GỬI EMAIL XÁC NHẬN NGAY KHI THANH TOÁN XONG
+                                try {
+                                    // Lấy đầy đủ data (tàu, cabin) để render ra HTML email không bị lỗi null
+                                    $bookingWithDetails = Booking::with(['schedule.cruise', 'details.cabinClass'])->find($booking->id);
+                                    
+                                    Mail::to($bookingWithDetails->customer_email)->send(new BookingSuccessMail($bookingWithDetails));
+                                    Log::info("Đã gửi email vé điện tử thành công cho đơn hàng: " . $booking->booking_code);
+                                } catch (\Exception $e) {
+                                    Log::error("Lỗi gửi email cho đơn {$booking->booking_code}: " . $e->getMessage());
+                                }
+
                             } 
                             // Giao dịch thất bại / Bị hủy
                             else {
-                                // Chỉ cập nhật thành cancelled nếu nó đang là holding (tránh ghi đè vô ích)
                                 if ($booking->status == 'holding') {
                                     $booking->update(['status' => 'cancelled']);
                                 }
@@ -206,15 +207,11 @@ class PaymentController extends Controller
             return response()->json(['RspCode' => '99', 'Message' => 'Unknown error']);
         }
     }
-
-    /**
-     * BƯỚC 3: RETURN URL (Trả về giao diện)
-     */
+     //BƯỚC 3: RETURN URL (Trả về giao diện)
     public function vnpayReturn(Request $request)
     {
         $inputData = [];
         
-        // Áp dụng luôn bộ lọc rác cho Return URL cho chuẩn bảo mật
         foreach ($request->all() as $key => $value) {
             if (substr($key, 0, 4) == "vnp_") {
                 $inputData[$key] = $value;
@@ -222,7 +219,6 @@ class PaymentController extends Controller
         }
 
         $vnp_SecureHash = $inputData['vnp_SecureHash'] ?? '';
-        
         unset($inputData['vnp_SecureHash']);
         unset($inputData['vnp_SecureHashType']);
         

@@ -125,6 +125,40 @@ class BookingController extends Controller
         }
     }
     /**
+     * KHÁCH HÀNG TỰ HỦY ĐƠN
+     */
+    public function cancelBooking($id)
+    {
+        // 1. Tìm đơn hàng (phải đúng là của user đang đăng nhập)
+        $booking = Booking::where('id', $id)
+            ->where('user_id', auth()->id())
+            ->first();
+
+        if (!$booking) {
+            return response()->json(['message' => 'Không tìm thấy đơn hàng hoặc bạn không có quyền!'], 404);
+        }
+
+        // 2. Chỉ cho phép hủy nếu đơn đang 'holding'
+        if ($booking->status !== 'holding') {
+            return response()->json(['message' => 'Chỉ có thể hủy đơn hàng đang chờ thanh toán.'], 400);
+        }
+
+        // 3. Gọi hàm releaseRoom() ở Model để xử lý nhả phòng an toàn
+        $success = $booking->releaseRoom();
+
+        if ($success) {
+            return response()->json([
+                'status' => 'success', 
+                'message' => 'Đã hủy đơn hàng và giải phóng phòng thành công!'
+            ]);
+        }
+
+        return response()->json([
+            'status' => 'error', 
+            'message' => 'Có lỗi xảy ra khi hủy đơn.'
+        ], 500);
+    }
+    /**
      * LẤY DANH SÁCH ĐƠN HÀNG CỦA USER ĐANG ĐĂNG NHẬP
      * (Đã gộp hàm UserBookings và myBookings thành 1 cho sạch sẽ)
      */

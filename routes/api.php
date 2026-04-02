@@ -6,7 +6,9 @@ use App\Http\Controllers\Api\CruiseController;
 use App\Http\Controllers\Api\BookingController;
 use App\Http\Controllers\Api\PaymentController;
 use App\Http\Controllers\Api\AuthController;
-
+use App\Models\Booking;
+use Illuminate\Support\Facades\Mail;
+use App\Mail\BookingSuccessMail;
 /*
 |--------------------------------------------------------------------------
 | CÁC ROUTE PUBLIC (KHÔNG CẦN ĐĂNG NHẬP)
@@ -21,7 +23,15 @@ Route::get('/cruises/{id}', [CruiseController::class, 'show']);
 
 // VNPAY IPN (Bắt buộc phải Public để Server VNPay có thể gửi kết quả về)
 Route::get('/payment/vnpay-ipn', [PaymentController::class, 'vnpayIpn']);
-
+Route::get('/test-mail', function () {
+    // Lấy đại 1 đơn hàng trong DB để test template
+    $booking = Booking::with(['schedule.cruise', 'details.cabinClass'])->first();
+    
+    // Gửi đến email thật của bạn (điền email bạn hay dùng để nhận thư)
+    Mail::to('hoangnam170924@gmail.com')->send(new BookingSuccessMail($booking));
+    
+    return "Xong! Kiểm tra hòm thư của bạn đi.";
+});
 /*
 |--------------------------------------------------------------------------
 | CÁC ROUTE PROTECTED (BẮT BUỘC ĐĂNG NHẬP BẰNG TOKEN)
@@ -51,4 +61,7 @@ Route::middleware('auth:sanctum')->group(function () {
     // --- THANH TOÁN ---
     // Đã chuyển vào khu vực bảo mật: Chỉ user đang đăng nhập mới được tạo thanh toán
     Route::post('/payment/create', [PaymentController::class, 'createPayment']);
+    // API Khách tự hủy đơn
+    Route::post('/bookings/{id}/cancel', [BookingController::class, 'cancelBooking']);
+    
 });
