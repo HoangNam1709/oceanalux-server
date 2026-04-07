@@ -103,10 +103,6 @@ class AuthController extends Controller
         ]);
     }
 
-    /**
-     * 👉 TÍNH NĂNG MỚI: ĐĂNG XUẤT (CỰC KỲ QUAN TRỌNG)
-     * Hủy token trong Database để bảo mật an toàn tuyệt đối
-     */
     public function logout(Request $request)
     {
         // Thu hồi (xóa) token hiện tại của người dùng
@@ -117,4 +113,5 @@ class AuthController extends Controller
             'message' => 'Đăng xuất thành công, Token đã được hủy!'
         ]);
     }
+  
 }

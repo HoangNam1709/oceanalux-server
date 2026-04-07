@@ -160,7 +160,6 @@ class BookingController extends Controller
     }
     /**
      * LẤY DANH SÁCH ĐƠN HÀNG CỦA USER ĐANG ĐĂNG NHẬP
-     * (Đã gộp hàm UserBookings và myBookings thành 1 cho sạch sẽ)
      */
     public function myBookings()
     {
@@ -176,7 +175,7 @@ class BookingController extends Controller
     }
 
     /**
-     * LẤY CHI TIẾT 1 ĐƠN HÀNG (Dùng khi F5 hoặc quay lại từ Dashboard)
+     * LẤY CHI TIẾT 1 ĐƠN HÀNG 
      */
     public function show($id)
     {

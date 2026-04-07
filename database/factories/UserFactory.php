@@ -2,33 +2,26 @@
 
 namespace Database\Factories;
 
-use App\Models\User;
 use Illuminate\Database\Eloquent\Factories\Factory;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
 
-/**
- * @extends Factory<User>
- */
 class UserFactory extends Factory
 {
-    /**
-     * The current password being used by the factory.
-     */
     protected static ?string $password;
 
-    /**
-     * Define the model's default state.
-     *
-     * @return array<string, mixed>
-     */
     public function definition(): array
     {
         return [
             'name' => fake()->name(),
             'email' => fake()->unique()->safeEmail(),
             'email_verified_at' => now(),
+            // Mật khẩu mặc định cho tất cả user ngẫu nhiên sẽ là 'password'
             'password' => static::$password ??= Hash::make('password'),
+            // Tạo số điện thoại giả định
+            'phone' => fake()->phoneNumber(),
+            // Mặc định tạo ra sẽ là khách hàng (viết thường theo chuẩn DB của bạn)
+            'role' => 'customer',
             'remember_token' => Str::random(10),
         ];
     }

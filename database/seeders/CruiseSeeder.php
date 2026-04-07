@@ -3,67 +3,63 @@
 namespace Database\Seeders;
 
 use Illuminate\Database\Seeder;
-use App\Models\User;
-use App\Models\Amenity;
-use App\Models\Cruise;
-use App\Models\CabinClass;
-use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\DB;
 
 class CruiseSeeder extends Seeder
 {
-    public function run(): void
+    public function run()
     {
-        // 1. Tạo tài khoản Admin và Khách hàng
-        User::create([
-            'name' => 'Quản trị viên',
-            'email' => 'admin@gmail.com',
-            'password' => Hash::make('12345678'),
-            'phone' => '0988888888',
-            'role' => 'admin',
-        ]);
+        $cruises = [
+            [
+                'name' => 'Scarlet Pearl Cruises',
+                'description' => 'Trải nghiệm đẳng cấp trên Vịnh Lan Hạ với thiết kế mang dáng dấp của một siêu du thuyền tỷ phú. Tàu trang bị bảo tàng ngọc trai trên boong, nhà hàng Tahiti và 100% cabin có ban công view biển tuyệt đẹp.',
+                'thumbnail' => 'https://images.unsplash.com/photo-1552465011-b4e21bf6e79a?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&q=80&w=1080',
+                'star_rating' => 5,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+            [
+                'name' => 'Heritage Cruises Binh Chuan',
+                'description' => 'Mang đậm phong cách kiến trúc Đông Dương (Indochine) cổ điển. Đây là du thuyền boutique đầu tiên trên Vịnh Bắc Bộ, nơi du khách vừa nghỉ dưỡng 5 sao vừa khám phá di sản văn hóa, lịch sử Việt Nam.',
+                'thumbnail' => 'https://images.unsplash.com/photo-1528127269322-539801943592?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&q=80&w=1080',
+                'star_rating' => 5,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+            [
+                'name' => 'Emperor Cruises Nha Trang',
+                'description' => 'Lấy cảm hứng từ cuộc sống vương giả của Vua Bảo Đại. Du thuyền mang đến trải nghiệm bao trọn gói (All-inclusive) trên vịnh Nha Trang với quản gia riêng, thưởng thức nhạc sống và ẩm thực cung đình.',
+                'thumbnail' => 'https://images.unsplash.com/photo-1600862083103-6250b731d102?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&q=80&w=1080',
+                'star_rating' => 5,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+            [
+                'name' => 'Aqua Mekong',
+                'description' => 'Nổi bật như một khách sạn 5 sao nổi di chuyển êm ái trên dòng sông Mekong hùng vĩ. Tàu có thiết kế hiện đại, hồ bơi vô cực trên mạn tàu và các tour thám hiểm văn hóa miệt vườn độc quyền.',
+                'thumbnail' => 'https://images.unsplash.com/photo-1504626815347-4948a2113337?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&q=80&w=1080',
+                'star_rating' => 5,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+            [
+                'name' => 'Ambassador Cruise',
+                'description' => 'Siêu du thuyền lớn nhất vịnh Hạ Long với sức chứa lên đến 500 khách. Nổi bật với thác nước kính cường lực, bể bơi sục Jacuzzi ngoài trời và cầu kính check-in vươn ra mũi tàu.',
+                'thumbnail' => 'https://images.unsplash.com/photo-1520625313364-c75cce92e2eb?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&q=80&w=1080',
+                'star_rating' => 4,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+            [
+                'name' => 'Stellar of the Seas',
+                'description' => 'Biểu tượng của sự xa hoa trẻ trung trên Vịnh Lan Hạ. Tàu sở hữu hầm cigar và rượu vang, sân golf mini, và một bể bơi theo mùa rộng lớn ngay giữa boong thượng.',
+                'thumbnail' => 'https://images.unsplash.com/photo-1548651806-b3e1577e923e?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&q=80&w=1080',
+                'star_rating' => 5,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]
+        ];
 
-        User::create([
-            'name' => 'Khách hàng VIP',
-            'email' => 'khachhang@gmail.com',
-            'password' => Hash::make('12345678'),
-            'phone' => '0911111111',
-            'role' => 'customer',
-        ]);
-
-        // 2. Tạo các tiện ích (Amenities)
-        $amenities = ['Hồ bơi vô cực', 'Wifi miễn phí', 'Spa & Massage', 'Phòng Gym', 'Nhà hàng 5 sao'];
-        foreach ($amenities as $item) {
-            Amenity::create(['name' => $item]);
-        }
-
-        // 3. Tạo 1 chiếc Du thuyền mẫu
-        $cruise = Cruise::create([
-            'name' => 'Du thuyền Victoria Hạ Long',
-            'description' => 'Trải nghiệm đẳng cấp 5 sao trên vịnh Hạ Long với thiết kế hiện đại và sang trọng.',
-            'star_rating' => 5,
-            'status' => 'active',
-        ]);
-
-        // Gắn tiện ích cho tàu này (Ví dụ gắn tiện ích ID 1, 2, 3)
-        $cruise->amenities()->attach([1, 2, 3]);
-
-        // 4. Tạo Hạng phòng cho tàu
-        CabinClass::create([
-            'cruise_id' => $cruise->id,
-            'name' => 'Phòng Standard (Tiêu chuẩn)',
-            'price' => 2500000,
-            'capacity' => 2,
-            'total_rooms' => 10,
-            'available_rooms' => 10,
-        ]);
-
-        CabinClass::create([
-            'cruise_id' => $cruise->id,
-            'name' => 'Phòng VIP Ocean View',
-            'price' => 5500000,
-            'capacity' => 2,
-            'total_rooms' => 5,
-            'available_rooms' => 5,
-        ]);
+        DB::table('cruises')->insert($cruises);
     }
 }

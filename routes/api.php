@@ -6,17 +6,15 @@ use App\Http\Controllers\Api\CruiseController;
 use App\Http\Controllers\Api\BookingController;
 use App\Http\Controllers\Api\PaymentController;
 use App\Http\Controllers\Api\AuthController;
-use App\Http\Controllers\Api\AdminController; // Import thêm AdminController
+use App\Http\Controllers\Api\AdminController; 
+use App\Http\Controllers\Api\ReviewController;
 use App\Models\Booking;
 use Illuminate\Support\Facades\Mail;
 use App\Mail\BookingSuccessMail;
 
-/*
-|--------------------------------------------------------------------------
-| CÁC ROUTE PUBLIC (KHÔNG CẦN ĐĂNG NHẬP)
-|--------------------------------------------------------------------------
-| Ai cũng có thể truy cập để xem tàu, đăng ký, đăng nhập và Webhook VNPAY
-*/
+
+//CÁC ROUTE PUBLIC (KHÔNG CẦN ĐĂNG NHẬP)
+
 Route::post('/login', [AuthController::class, 'login']);
 Route::post('/register', [AuthController::class, 'register']);
 
@@ -33,17 +31,11 @@ Route::get('/test-mail', function () {
     return "Xong! Kiểm tra hòm thư của bạn đi.";
 });
 
-/*
-|--------------------------------------------------------------------------
-| CÁC ROUTE PROTECTED (BẮT BUỘC ĐĂNG NHẬP BẰNG TOKEN)
-|--------------------------------------------------------------------------
-| Phải có Token hợp lệ trên Header mới được phép đi qua cửa này
-*/
+// CÁC ROUTE PROTECTED (BẮT BUỘC ĐĂNG NHẬP BẰNG TOKEN)
+
 Route::middleware('auth:sanctum')->group(function () {
-    
-    // ==========================================
+
     // KHU VỰC CỦA NGƯỜI DÙNG (USER)
-    // ==========================================
     Route::get('/user', function (Request $request) {
         return response()->json([
             'status' => 'success',
@@ -61,15 +53,15 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // --- Thanh toán ---
     Route::post('/payment/create', [PaymentController::class, 'createPayment']);
+    Route::post('/reviews', [ReviewController::class, 'store']);
 
 
-    // ==========================================
     // KHU VỰC CỦA QUẢN TRỊ VIÊN (ADMIN)
-    // ==========================================
     Route::prefix('admin')->group(function () {
         // Lấy thống kê tổng quan (Dashboard)
         Route::get('/dashboard/stats', [AdminController::class, 'getDashboardStats']);
-        
+        // Cập nhật trạng thái đơn hàng (Admin xử lý đơn)
+        Route::put('/bookings/{id}/status', [AdminController::class, 'updateBookingStatus']);
         // Lấy danh sách toàn bộ đơn đặt vé
         Route::get('/bookings', [AdminController::class, 'getBookings']);
         

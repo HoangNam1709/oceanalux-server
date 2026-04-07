@@ -18,17 +18,14 @@ class AdminController extends Controller
     public function getDashboardStats()
     {
         try {
-            // Đếm tổng số đơn
             $totalBookings = Booking::count();
             
-            // Đếm số đơn đã thanh toán (giả sử trạng thái của bạn là 'paid')
-            $confirmedBookings = Booking::where('status', 'paid')->count();
+            // SỬA: Phải đếm cả đơn confirmed, paid và completed
+            $confirmedBookings = Booking::whereIn('status', ['paid', 'completed'])->count();
+        
+            // SỬA: Doanh thu cũng phải tính tổng của cả 3 trạng thái này
+            $totalRevenue = Booking::whereIn('status', [ 'paid', 'completed'])->sum('total_price');
             
-            // Tính tổng doanh thu
-            $totalRevenue = Booking::where('status', 'paid')->sum('total_price');
-            
-            // FIX LỖI 500: Tạm thời không dùng hàm sum() của SQL để đếm số khách nữa.
-            // Chúng ta tạm ước tính: Mỗi đơn thành công x 2 khách (Hoặc bạn sửa lại sau)
             $totalGuests = $confirmedBookings * 2;
 
             return response()->json([
@@ -42,7 +39,6 @@ class AdminController extends Controller
             ]);
 
         } catch (\Exception $e) {
-            // NẾU CÒN LỖI, NÓ SẼ KHÔNG SẬP SERVER NỮA MÀ SẼ BÁO LỖI RA ĐÂY
             return response()->json([
                 'status' => 'error',
                 'message' => 'Lỗi sập Server: ' . $e->getMessage()
@@ -54,23 +50,15 @@ class AdminController extends Controller
      */
     public function getBookings()
     {
-        // Lấy toàn bộ đơn hàng kèm theo thông tin Tàu và Hạng phòng
-        // Sắp xếp đơn mới nhất lên đầu
         $bookings = Booking::with(['schedule.cruise', 'details.cabinClass'])
             ->orderBy('created_at', 'desc')
             ->get();
 
-        // Biến đổi dữ liệu (Transform) để khớp 100% với Interface của React Frontend
         $formattedBookings = $bookings->map(function ($booking) {
             
-            // Map trạng thái DB ('holding', 'paid', 'cancelled') sang UI ('pending', 'confirmed', 'cancelled')
-            $uiStatus = 'pending';
-            if ($booking->status == 'paid') $uiStatus = 'confirmed';
-            if ($booking->status == 'cancelled') $uiStatus = 'cancelled';
 
-            // Xử lý ngày tháng an toàn
             $departureDate = $booking->schedule ? Carbon::parse($booking->schedule->departure_time)->format('d/m/Y') : 'N/A';
-            $returnDate = $booking->schedule ? Carbon::parse($booking->schedule->departure_time)->addDays(2)->format('d/m/Y') : 'N/A'; // Tạm cộng 2 ngày, bạn chỉnh lại theo duration của tàu nhé
+            $returnDate = $booking->schedule ? Carbon::parse($booking->schedule->departure_time)->addDays(2)->format('d/m/Y') : 'N/A';
             $bookedDate = $booking->created_at ? $booking->created_at->format('d/m/Y') : 'N/A';
 
             return [
@@ -82,9 +70,12 @@ class AdminController extends Controller
                 'departureDate' => $departureDate,
                 'returnDate' => $returnDate,
                 'cabinType' => $booking->details->first()->cabinClass->name ?? 'N/A',
-                'guests' => $booking->number_of_guests ?? 2, // Đổi thành tên cột số khách thực tế của bạn
+                'guests' => $booking->number_of_guests ?? 2,
                 'totalAmount' => (float) $booking->total_price,
-                'status' => $uiStatus,
+                
+                // SỬA: Lấy nguyên gốc trạng thái từ Database truyền sang React
+                'status' => $booking->status,
+                
                 'paymentMethod' => strtoupper($booking->payment_method ?? 'CASH'),
                 'bookedDate' => $bookedDate,
             ];
@@ -153,9 +144,6 @@ class AdminController extends Controller
             'data' => $formattedCruises
         ]);
     }
-    /**
-     * API 4: Thêm Du thuyền mới vào Database
-     */
     /**
      * API 4: Thêm Du thuyền mới vào Database
      */
@@ -412,4 +400,19 @@ class AdminController extends Controller
             return response()->json(['status' => 'success']);
         } catch (\Exception $e) { return response()->json(['status' => 'error'], 500); }
     }
+      public function updateBookingStatus(Request $request, $id)
+{
+    $request->validate([
+        'status' => 'required|in:holding,confirmed,paid,completed,cancelled'
+    ]);
+
+    $booking = Booking::findOrFail($id);
+    $booking->status = $request->status;
+    $booking->save();
+
+    return response()->json([
+        'message' => 'Cập nhật trạng thái thành công',
+        'data' => $booking
+    ]);
+}
 }

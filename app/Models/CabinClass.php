@@ -9,7 +9,16 @@ class CabinClass extends Model
 {
     use HasFactory;
 
-    // Tắt khiên bảo vệ để cho phép bơm dữ liệu
+    public function images()
+    {
+        return $this->hasMany(CabinImage::class, 'cabin_class_id');
+    }
+
+    // 2. Một phòng có nhiều tiện ích (Ban công, Bồn tắm, Minibar...)
+    public function amenities()
+    {
+        return $this->belongsToMany(Amenity::class, 'cabin_class_amenity', 'cabin_class_id', 'amenity_id');
+    }
     protected $guarded = [];
     
 }
