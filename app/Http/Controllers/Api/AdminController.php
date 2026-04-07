@@ -202,9 +202,9 @@ class AdminController extends Controller
             $cruise->name = $request->name;
             $cruise->thumbnail = $request->thumbnail;
             $cruise->destination = $request->destination;
+            $cruise->description = $request->description;
             $cruise->duration_days = $request->durationDays;
             $cruise->duration_nights = $request->durationNights;
-            $cruise->description = $request->description;
             $cruise->star_rating = $request->starRating;
             $cruise->status = $request->status;
             $cruise->save();
@@ -264,6 +264,8 @@ class AdminController extends Controller
             $cabin = new \App\Models\CabinClass();
             $cabin->cruise_id = $request->cruise_id; // Khóa ngoại nối với Tàu
             $cabin->name = $request->name;
+            $cabin->area = $request->area ?? 20; // Diện tích phòng, mặc định 20m2 nếu chưa có dữ liệu
+            $cabin->deck = $request->deck ?? 1; // Tầng tàu, mặc định tầng 1 nếu chưa có dữ liệu
             $cabin->price = $request->pricePerNight;
             $cabin->capacity = $request->capacity;
             $cabin->total_rooms = $request->available; 
@@ -276,6 +278,8 @@ class AdminController extends Controller
                 'id' => (string) $cabin->id,
                 'type' => $request->type ?? 'Standard',
                 'name' => $cabin->name,
+                'area' => (float) $cabin->area,
+                'deck' => (int) $cabin->deck,
                 'pricePerNight' => (float) $cabin->price,
                 'capacity' => (int) $cabin->capacity,
                 'available' => (int) $cabin->available_rooms,
@@ -297,6 +301,8 @@ class AdminController extends Controller
         try {
             $cabin = \App\Models\CabinClass::findOrFail($id);
             $cabin->name = $request->name;
+            $cabin->area = $request->area ?? $cabin->area; 
+            $cabin->deck = $request->deck ?? $cabin->deck; 
             $cabin->price = $request->pricePerNight;
             $cabin->capacity = $request->capacity;
             $cabin->available_rooms = $request->available;
