@@ -52,8 +52,8 @@ class Booking extends Model
                     $cabin->available_rooms += $detail->quantity;
                     $cabin->save();
                     
-                    // Nếu hệ thống dùng WebSockets, có thể kích hoạt event ở đây để Cập nhật UI real-time
-                    // broadcast(new \App\Events\RoomReleased($cabin->id, $cabin->available_rooms));
+                    // Dùng $booking->schedule_id vì chúng ta đang xử lý cái $booking ở ngay phía trên
+                    broadcast(new \App\Events\RoomReleased($cabin->id, $cabin->available_rooms, $booking->schedule_id));
                 }
             }
 

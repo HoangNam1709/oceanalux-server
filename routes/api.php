@@ -17,10 +17,11 @@ use App\Mail\BookingSuccessMail;
 
 Route::post('/login', [AuthController::class, 'login']);
 Route::post('/register', [AuthController::class, 'register']);
-
+Route::post('/send-otp', [AuthController::class, 'sendOtp']);
+Route::post('/verify-and-process', [AuthController::class, 'verifyAndProcess']);
 Route::get('/cruises', [CruiseController::class, 'index']);
 Route::get('/cruises/{id}', [CruiseController::class, 'show']);
-
+Route::get('/schedules/{id}/available-cabins', [CruiseController::class, 'getAvailableCabins']);
 // VNPAY IPN (Bắt buộc phải Public để Server VNPay có thể gửi kết quả về)
 Route::get('/payment/vnpay-ipn', [PaymentController::class, 'vnpayIpn']);
 
@@ -50,7 +51,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/bookings/{id}', [BookingController::class, 'show']); 
     Route::post('/bookings/hold', [BookingController::class, 'holdRoom']);
     Route::post('/bookings/{id}/cancel', [BookingController::class, 'cancelBooking']); // Khách tự hủy đơn
-
+    
     // --- Thanh toán ---
     Route::post('/payment/create', [PaymentController::class, 'createPayment']);
     Route::post('/reviews', [ReviewController::class, 'store']);

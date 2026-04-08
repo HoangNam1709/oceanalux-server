@@ -24,85 +24,127 @@ class BookingController extends Controller
             'quantity' => 'required|integer|min:1',
         ]);
 
-        // 👉 TỐI ƯU: Lấy toàn bộ thông tin User đang đăng nhập thay vì chỉ lấy ID
         $user = auth()->user();
         $now = now();
-
-        // 1. CHỐT CHẶN: Kiểm tra xem User này đã có đơn hàng 'holding' còn hạn không
-        $existingBooking = Booking::where('user_id', $user->id)
+        $newSchedule = \App\Models\Schedule::find($request->schedule_id);
+        $targetCruiseId = $newSchedule->cruise_id ?? null;
+        // 1. TÌM ĐƠN HÀNG ĐANG GIỮ CHỖ BẤT KỲ CỦA USER NÀY
+        $existingBooking = Booking::with(['schedule', 'details'])
+            ->where('user_id', $user->id)
             ->where('status', 'holding')
             ->where('hold_expires_at', '>', $now)
-            ->whereHas('details', function ($q) use ($request) {
-                $q->where('cabin_class_id', $request->cabin_class_id);
+            ->whereHas('schedule', function ($q) use ($targetCruiseId) { // <--- ĐÃ THÊM USE
+                $q->where('cruise_id', $targetCruiseId);
             })
             ->first();
 
         if ($existingBooking) {
-            return response()->json([
-                'status' => 'success',
-                'message' => 'Tiếp tục đơn hàng đang chờ thanh toán.',
-                'data' => [
-                    'booking_id' => $existingBooking->id,
-                    'booking_code' => $existingBooking->booking_code,
-                    'hold_expires_at' => $existingBooking->hold_expires_at,
-                    'remaining_seconds' => (int) $now->diffInSeconds($existingBooking->hold_expires_at, false)
-                ]
-            ]);
+            $oldCabinId = $existingBooking->details->first()->cabin_class_id ?? null;
+
+            // Kịch bản A: Khách bấm F5 hoặc chọn lại đúng phòng/ngày đang giữ
+            $isSameBooking = ($existingBooking->schedule_id == $request->schedule_id) && ($oldCabinId == $request->cabin_class_id);
+
+            if ($isSameBooking) {
+                return response()->json([
+                    'status' => 'success',
+                    'message' => 'Tiếp tục đơn hàng đang chờ thanh toán.',
+                    'data' => [
+                        'booking_id' => $existingBooking->id,
+                        'booking_code' => $existingBooking->booking_code,
+                        'hold_expires_at' => $existingBooking->hold_expires_at,
+                        'remaining_seconds' => (int) $now->diffInSeconds($existingBooking->hold_expires_at, false)
+                    ]
+                ]);
+            }
+
+            // Kịch bản B: Khách đang chọn phòng/ngày MỚI khác với đơn cũ
+            // Nếu React có gửi cờ báo hiệu "TÔI MUỐN HỦY ĐƠN CŨ"
+            if ($request->has('force_cancel_old') && $request->force_cancel_old == true) {
+                $existingBooking->releaseRoom(); // Hàm này của bạn sẽ Hủy và trả lại phòng cho lịch trình cũ
+            } else {
+                // Nếu React chưa gửi cờ, báo về bắt React hiện Popup hỏi ý kiến khách
+                return response()->json([
+                    'status' => 'require_confirmation',
+                    'message' => 'Bạn đang có một đơn hàng khác đang chờ thanh toán.',
+                    'data' => [
+                        'old_booking_id' => $existingBooking->id,
+                        'old_schedule_id' => $existingBooking->schedule_id,
+                        'old_cabin_id' => $oldCabinId,
+                        // Lấy ngày đi để hiển thị lên popup
+                        'old_date' => $existingBooking->schedule->departure_time ?? $existingBooking->schedule->departure_date ?? null, 
+                    ]
+                ]);
+            }
         }
 
-        // 2. NẾU KHÔNG CÓ, TIẾN HÀNH TẠO MỚI TRONG TRANSACTION
+        // ============================================
+        // 2. NẾU KHÔNG CÓ XUNG ĐỘT, TIẾN HÀNH TẠO MỚI
+        // ============================================
         try {
             DB::beginTransaction();
 
-            // Khóa dòng dữ liệu để chống Overbooking (Race Condition)
             $cabin = CabinClass::where('id', $request->cabin_class_id)->lockForUpdate()->first();
 
-            // KIỂM TRA PHÒNG TRỐNG (Đưa vào đúng vị trí sau khi lock)
             if (!$cabin || $cabin->available_rooms < $request->quantity) {
                 DB::rollBack();
                 return response()->json([
                     'status' => 'error',
                     'message' => 'Rất tiếc! Hạng phòng này vừa được người khác giữ chỗ hoặc đã hết.'
-                ], 400); // 400 Bad Request
+                ], 400); 
             }
+            $capacity = $cabin->capacity ?? 2; // Tiêu chuẩn của phòng
+            $guests = $request->guests ?? 2;   // Số khách gửi từ React lên
+            
+            // 1. Chặn đứng nếu hack gửi số lượng vượt quá +2
+            if ($guests > $capacity + 2) {
+                DB::rollBack();
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Số lượng khách vượt quá quy định của phòng. Vui lòng chọn phòng khác!'
+                ], 400);
+            }
+
+            // 2. Tính toán giá mới (Phụ thu 15% nếu quá tiêu chuẩn)
+            $priceMultiplier = 1;
+            if ($guests > $capacity && $guests <= $capacity + 2) {
+                $priceMultiplier = 1.15;
+            }
+            
+            $finalCabinPrice = $cabin->price * $priceMultiplier;
+            // ==========================================
 
             // Trừ số lượng phòng
             $cabin->available_rooms -= $request->quantity;
             $cabin->save();
 
-            // Tạo mã booking ngẫu nhiên
+
             $bookingCode = 'BK-' . strtoupper(Str::random(6));
-            
-            // Thiết lập thời gian hết hạn (15 phút)
             $expiresAt = now()->addMinutes(15);
 
-            // Tạo đơn hàng
             $booking = Booking::create([
                 'booking_code' => $bookingCode,
                 'user_id' => $user->id,
                 'schedule_id' => $request->schedule_id,
-                'total_price' => $cabin->price * $request->quantity,
+                'total_price' => $finalCabinPrice * $request->quantity,
                 'status' => 'holding',
                 'hold_expires_at' => $expiresAt,
-                
-                // 👉 TỐI ƯU: Lấy dữ liệu từ DB, nếu Request có truyền lên thì ưu tiên Request
                 'customer_name' => $request->customer_name ?? $user->name,
                 'customer_email' => $request->customer_email ?? $user->email,
                 'customer_phone' => $request->customer_phone ?? $user->phone,
+                'guests' => $guests,
             ]);
 
-            // Tạo chi tiết đơn hàng
             BookingDetail::create([
                 'booking_id' => $booking->id,
                 'cabin_class_id' => $cabin->id,
                 'quantity' => $request->quantity,
-                'price' => $cabin->price
+                'price' => $finalCabinPrice
             ]);
 
             DB::commit();
 
-            // Phát event (Nếu bạn dùng Socket)
-            broadcast(new RoomReleased($cabin->id, $cabin->available_rooms));
+            // Kích hoạt Real-time nhả phòng 
+            broadcast(new RoomReleased($cabin->id, $cabin->available_rooms, $request->schedule_id));
 
             return response()->json([
                 'status' => 'success',
@@ -117,11 +159,7 @@ class BookingController extends Controller
 
         } catch (\Exception $e) {
             DB::rollBack();
-            return response()->json([
-                'status' => 'error',
-                'message' => 'Lỗi hệ thống khi giữ phòng.',
-                'error' => $e->getMessage()
-            ], 500);
+            return response()->json(['status' => 'error', 'message' => 'Lỗi hệ thống', 'error' => $e->getMessage()], 500);
         }
     }
     /**

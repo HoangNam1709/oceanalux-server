@@ -60,7 +60,7 @@ class CruiseController extends Controller
         // Lấy chi tiết 1 tàu, kèm theo dữ liệu bảng Tiện ích (amenities) và Hạng phòng (cabinClasses)
         // Lưu ý: Nhớ thêm hàm cabinClasses() vào Model Cruise giống như hàm amenities() nhé!
         $cruise = Cruise::with(['amenities', 'cabinClasses','images','reviews.user','itineraries','cabinClasses.images', 
-            'cabinClasses.amenities'])->find($id);
+            'cabinClasses.amenities','schedules'])->find($id);
 
         if (!$cruise) {
             return response()->json(['message' => 'Không tìm thấy du thuyền'], 404);
@@ -71,5 +71,39 @@ class CruiseController extends Controller
             'data' => $cruise
         ]);
         
+    }
+    public function getAvailableCabins($id)
+    {
+        // 1. Lấy thông tin Lịch trình
+        $schedule = \App\Models\Schedule::findOrFail($id);
+        
+        // 2. Lấy tất cả Hạng phòng của con tàu này kèm tiện ích và ảnh
+        $cabins = \App\Models\CabinClass::with(['amenities', 'images'])
+                    ->where('cruise_id', $schedule->cruise_id)
+                    ->get();
+
+        // 3. Tính toán số phòng CÒN TRỐNG cho từng hạng phòng TRONG NGÀY NÀY
+        $cabins = $cabins->map(function ($cabin) use ($id) {
+            
+            // Đếm số lượng phòng đã bị đặt (trừ các đơn đã hủy)
+            $bookedRooms = \App\Models\BookingDetail::where('cabin_class_id', $cabin->id)
+                ->whereHas('booking', function($query) use ($id) {
+                    $query->where('schedule_id', $id)
+                          ->whereIn('status', ['holding', 'pending', 'confirmed', 'paid']); // Đang giữ hoặc đã thanh toán
+                })
+                ->sum('quantity'); // Giả sử bảng chi tiết có cột quantity (số lượng phòng)
+            
+            // Nếu DB của bạn mỗi dòng là 1 phòng, thì dùng ->count() thay vì sum()
+
+            // Gán lại số phòng available (Tối thiểu là 0 để không bị số âm)
+            $cabin->available_rooms = max(0, $cabin->total_rooms - $bookedRooms);
+            
+            return $cabin;
+        });
+
+        return response()->json([
+            'status' => 'success',
+            'data' => $cabins
+        ]);
     }
 }

@@ -37,4 +37,8 @@ class Cruise extends Model
     {
         return $this->hasMany(Itinerary::class)->orderBy('day_number');
     }
+    public function schedules()
+    {
+        return $this->hasMany(Schedule::class);
+    }
 }

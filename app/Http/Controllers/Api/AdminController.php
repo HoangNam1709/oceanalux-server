@@ -70,7 +70,7 @@ class AdminController extends Controller
                 'departureDate' => $departureDate,
                 'returnDate' => $returnDate,
                 'cabinType' => $booking->details->first()->cabinClass->name ?? 'N/A',
-                'guests' => $booking->number_of_guests ?? 2,
+                'guests' => $booking->guests ?? 2,
                 'totalAmount' => (float) $booking->total_price,
                 
                 // SỬA: Lấy nguyên gốc trạng thái từ Database truyền sang React

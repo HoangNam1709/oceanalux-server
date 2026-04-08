@@ -16,7 +16,6 @@ use Illuminate\Notifications\Notifiable;
 #[Hidden(['password', 'remember_token'])]
 class User extends Authenticatable
 {
-    // 2. SỬ DỤNG HasApiTokens ở đây
     use HasApiTokens, HasFactory, Notifiable;
 
     /** @use HasFactory<UserFactory> */

@@ -20,3 +20,6 @@ Route::get('/payment/vnpay/ipn', [PaymentController::class, 'vnpayIpn']);
 
 // 3. Return URL: Nơi khách hàng được chuyển hướng về sau khi thanh toán trên app ngân hàng
 Route::get('/payment/vnpay/return', [PaymentController::class, 'vnpayReturn']);
+Route::get('/preview-otp', function () {
+    return new \App\Mail\SendOTPMail('123456');
+});

@@ -3,10 +3,9 @@ namespace App\Events;
 
 use Illuminate\Broadcasting\Channel;
 use Illuminate\Broadcasting\InteractsWithSockets;
-use Illuminate\Contracts\Broadcasting\ShouldBroadcastNow; // Dùng bản "Now" để chạy ngay lập tức
+use Illuminate\Contracts\Broadcasting\ShouldBroadcastNow; 
 use Illuminate\Foundation\Events\Dispatchable;
 use Illuminate\Queue\SerializesModels;
-
 
 class RoomReleased implements ShouldBroadcastNow
 {
@@ -14,29 +13,32 @@ class RoomReleased implements ShouldBroadcastNow
 
     public $cabinClassId;
     public $availableRooms;
+    public $scheduleId; 
 
-    /**
-     * Create a new event instance.
-     */
-    public function __construct($cabinClassId, $availableRooms)
+    public function __construct($cabinClassId, $availableRooms, $scheduleId) 
     {
         $this->cabinClassId = $cabinClassId;
         $this->availableRooms = $availableRooms;
+        $this->scheduleId = $scheduleId; // Gán giá trị
     }
 
-    /**
-     * Tên Channel để React lắng nghe (rooms)
-     */
     public function broadcastOn(): array
     {
         return [new Channel('rooms')];
     }
 
-    /**
-     * Ép tên Event gọn gàng để React dễ bắt (Không bị dính namespace App\Events)
-     */
+
     public function broadcastAs(): string
     {
         return 'RoomReleased';
+    }
+
+    public function broadcastWith(): array
+    {
+        return [
+            'cabinClassId' => $this->cabinClassId,
+            'availableRooms' => $this->availableRooms,
+            'schedule_id'  => $this->scheduleId, // Gửi cái này xuống để React kiểm tra
+        ];
     }
 }
