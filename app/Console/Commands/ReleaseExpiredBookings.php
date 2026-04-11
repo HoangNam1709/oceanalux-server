@@ -45,25 +45,24 @@ class ReleaseExpiredBookings extends Command
                     $freshBooking->status = 'cancelled';
                     $freshBooking->save();
 
-                    // 3. Hoàn trả số lượng phòng an toàn
-                    foreach ($freshBooking->details as $detail) {
-                        // Khóa luôn bảng Hạng Phòng để không ai đặt lẹm vào lúc này
-                        $cabin = CabinClass::where('id', $detail->cabin_class_id)->lockForUpdate()->first();
-                        
-                        if ($cabin) {
-                            $cabin->available_rooms += $detail->quantity;
-                            
-                            // (Tùy chọn) Chống cộng lố tổng số phòng nếu bạn có cột total_rooms
-                            // if (isset($cabin->total_rooms) && $cabin->available_rooms > $cabin->total_rooms) {
-                            //     $cabin->available_rooms = $cabin->total_rooms;
-                            // }
-                            
-                            $cabin->save();
-                            
-                            // Phát tín hiệu: Cập nhật số phòng trống cho người khác mua
-                            broadcast(new RoomReleased($cabin->id, $cabin->available_rooms));
-                        }
-                    }
+                    // 3. Hoàn trả số lượng phòng an toàn VÀO BẢNG TRUNG GIAN
+foreach ($freshBooking->details as $detail) {
+    
+    // Tăng số lượng phòng trực tiếp trong bảng pivot dựa trên schedule_id và cabin_class_id
+    DB::table('cabin_class_schedule')
+        ->where('schedule_id', $freshBooking->schedule_id)
+        ->where('cabin_class_id', $detail->cabin_class_id)
+        ->increment('available_rooms', $detail->quantity);
+        
+    // Lấy lại số lượng phòng MỚI NHẤT của ngày đó sau khi đã cộng thêm
+    $newAvailableRooms = DB::table('cabin_class_schedule')
+        ->where('schedule_id', $freshBooking->schedule_id)
+        ->where('cabin_class_id', $detail->cabin_class_id)
+        ->value('available_rooms');
+
+    
+    broadcast(new RoomReleased($detail->cabin_class_id, $freshBooking->schedule_id, $newAvailableRooms));
+}
 
                     // 4. PHÁT TÍN HIỆU: Đuổi khách khỏi Checkout
                     broadcast(new BookingExpired($freshBooking->id));

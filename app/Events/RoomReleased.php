@@ -18,8 +18,9 @@ class RoomReleased implements ShouldBroadcastNow
     public function __construct($cabinClassId, $availableRooms, $scheduleId) 
     {
         $this->cabinClassId = $cabinClassId;
+        $this->scheduleId = $scheduleId;
         $this->availableRooms = $availableRooms;
-        $this->scheduleId = $scheduleId; // Gán giá trị
+        
     }
 
     public function broadcastOn(): array

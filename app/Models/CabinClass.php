@@ -13,7 +13,11 @@ class CabinClass extends Model
     {
         return $this->hasMany(CabinImage::class, 'cabin_class_id');
     }
-
+    public function schedules() {
+    return $this->belongsToMany(Schedule::class, 'cabin_class_schedule')
+                ->withPivot('available_rooms')
+                ->withTimestamps();
+}
     // 2. Một phòng có nhiều tiện ích (Ban công, Bồn tắm, Minibar...)
     public function amenities()
     {

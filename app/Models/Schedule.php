@@ -11,5 +11,10 @@ class Schedule extends Model
     {
     return $this->belongsTo(Cruise::class, 'cruise_id');
     }  
+    public function cabin_classes() {
+    return $this->belongsToMany(CabinClass::class, 'cabin_class_schedule')
+                ->withPivot('available_rooms')
+                ->withTimestamps();
+}
     protected $guarded = [];
 }

@@ -4,63 +4,81 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Cruise;
+use App\Models\Schedule;
+use App\Models\CabinClass;
 use Illuminate\Http\Request;
 
 class CruiseController extends Controller
 {
+    /**
+     * TÌM KIẾM DU THUYỀN
+     */
     public function index(Request $request)
-{
-    // 1. Khởi tạo query và load sẵn các quan hệ cần thiết
-    // Thêm 'images' và 'cabinClasses' để trang kết quả tìm kiếm có ảnh và tính được giá min
-    $query = Cruise::with(['amenities', 'images', 'cabinClasses']);
+    {
+        $query = Cruise::with(['amenities', 'images', 'cabinClasses']);
 
-    // 2. TÌM THEO TÊN HOẶC ĐIỂM ĐẾN
-    if ($request->filled('location')) {
-        $location = $request->location;
-        $query->where(function($q) use ($location) {
-            $q->where('name', 'LIKE', '%' . $location . '%')
-              ->orWhere('destination', 'LIKE', '%' . $location . '%');
-        });
+        // 1. TÌM THEO TÊN HOẶC ĐIỂM ĐẾN
+        if ($request->filled('location')) {
+            $location = $request->location;
+            $query->where(function($q) use ($location) {
+                $q->where('name', 'LIKE', '%' . $location . '%')
+                  ->orWhere('destination', 'LIKE', '%' . $location . '%');
+            });
+        }
+
+        // 2. TÌM THEO NGÀY KHỞI HÀNH VÀ PHÒNG TRỐNG
+        // Logic mới: Phải kiểm tra tồn tại lịch trình VÀ còn phòng trong bảng PIVOT
+        if ($request->filled('date')) {
+            $date = date('Y-m-d', strtotime($request->date)); 
+            $guests = (int) ($request->guests ?? 1);
+
+            $query->whereHas('schedules', function($q) use ($date, $guests) {
+                $q->whereDate('departure_date', $date)
+                  ->whereNotIn('status', ['completed', 'cancelled']);
+
+                // Kiểm tra xem trong ngày này có hạng phòng nào đủ chỗ và còn trống không
+                $q->whereHas('cabin_classes', function($pivotQ) use ($guests) {
+                    $pivotQ->where('capacity', '>=', $guests)
+                           ->where('cabin_class_schedule.available_rooms', '>', 0);
+                });
+            });
+        } 
+        // 3. Nếu khách chỉ tìm theo số lượng người (không chọn ngày)
+        elseif ($request->filled('guests')) {
+            $guests = (int) $request->guests;
+            $query->whereHas('cabinClasses', function($q) use ($guests) {
+                $q->where('capacity', '>=', $guests);
+                // Vì không có ngày cụ thể, ta chỉ lọc theo sức chứa thiết kế (total_rooms)
+            });
+        }
+
+        $cruises = $query->get();
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'Lấy danh sách du thuyền thành công',
+            'data' => $cruises
+        ]);
     }
 
-    // 3. TÌM THEO NGÀY KHỞI HÀNH
-    if ($request->filled('date')) {
-        // Chuyển đổi định dạng ngày cho an toàn
-        $date = date('Y-m-d', strtotime($request->date)); 
-        
-        $query->whereHas('schedules', function($q) use ($date) {
-            // Tìm các tàu có lịch trình trùng khớp ngày và trạng thái chưa hoàn thành/hủy
-            $q->whereDate('departure_date', $date)
-              ->whereNotIn('status', ['completed', 'cancelled']); 
-        });
-    }
-
-    // 4. TÌM THEO SỐ LƯỢNG KHÁCH
-    if ($request->filled('guests')) {
-        $guests = (int) $request->guests;
-        $query->whereHas('cabinClasses', function($q) use ($guests) {
-            // Tìm tàu có hạng phòng chứa đủ khách VÀ còn phòng trống
-            $q->where('capacity', '>=', $guests)
-              ->where('available_rooms', '>', 0);
-        });
-    }
-
-    // 5. Thực thi query lấy dữ liệu (Dùng get() như code cũ của bạn)
-    $cruises = $query->get();
-
-    // Trả về định dạng JSON chuẩn bị sẵn cho ReactJS
-    return response()->json([
-        'status' => 'success',
-        'message' => 'Lấy danh sách du thuyền thành công',
-        'data' => $cruises
-    ]);
-}
+    /**
+     * CHI TIẾT DU THUYỀN
+     */
     public function show($id)
     {
-        // Lấy chi tiết 1 tàu, kèm theo dữ liệu bảng Tiện ích (amenities) và Hạng phòng (cabinClasses)
-        // Lưu ý: Nhớ thêm hàm cabinClasses() vào Model Cruise giống như hàm amenities() nhé!
-        $cruise = Cruise::with(['amenities', 'cabinClasses','images','reviews.user','itineraries','cabinClasses.images', 
-            'cabinClasses.amenities','schedules'])->find($id);
+        $cruise = Cruise::with([
+            'amenities', 
+            'cabinClasses.images', 
+            'cabinClasses.amenities',
+            'images',
+            'reviews.user',
+            'itineraries',
+            'schedules' => function($query) {
+                $query->whereDate('departure_date', '>=', now()->toDateString()) 
+                      ->whereNotIn('status', ['cancelled', 'completed'])         
+                      ->orderBy('departure_date', 'asc');                        
+            }
+        ])->find($id);
 
         if (!$cruise) {
             return response()->json(['message' => 'Không tìm thấy du thuyền'], 404);
@@ -70,35 +88,54 @@ class CruiseController extends Controller
             'status' => 'success',
             'data' => $cruise
         ]);
-        
     }
+
+    /**
+     * LẤY PHÒNG TRỐNG THEO LỊCH TRÌNH (API CHỐT)
+     */
     public function getAvailableCabins($id)
     {
-        // 1. Lấy thông tin Lịch trình
-        $schedule = \App\Models\Schedule::findOrFail($id);
-        
-        // 2. Lấy tất cả Hạng phòng của con tàu này kèm tiện ích và ảnh
-        $cabins = \App\Models\CabinClass::with(['amenities', 'images'])
-                    ->where('cruise_id', $schedule->cruise_id)
-                    ->get();
+        // 1. Lấy Lịch trình cụ thể, bốc dữ liệu từ bảng trung gian (Pivot)
+        $schedule = Schedule::with([
+            'cabin_classes.amenities', 
+            'cabin_classes.images'
+        ])->find($id);
 
-        // 3. Tính toán số phòng CÒN TRỐNG cho từng hạng phòng TRONG NGÀY NÀY
-        $cabins = $cabins->map(function ($cabin) use ($id) {
-            
-            // Đếm số lượng phòng đã bị đặt (trừ các đơn đã hủy)
-            $bookedRooms = \App\Models\BookingDetail::where('cabin_class_id', $cabin->id)
-                ->whereHas('booking', function($query) use ($id) {
-                    $query->where('schedule_id', $id)
-                          ->whereIn('status', ['holding', 'pending', 'confirmed', 'paid']); // Đang giữ hoặc đã thanh toán
-                })
-                ->sum('quantity'); // Giả sử bảng chi tiết có cột quantity (số lượng phòng)
-            
-            // Nếu DB của bạn mỗi dòng là 1 phòng, thì dùng ->count() thay vì sum()
+        // 2. Nếu chưa có lịch trình (Dữ liệu hiển thị mặc định cho Frontend khi mới vào trang)
+        if (!$schedule) {
+            $cruiseId = request('cruise_id');
+            $defaultCabins = CabinClass::with(['amenities', 'images'])
+                ->where('cruise_id', $cruiseId)
+                ->get()
+                ->map(function($cabin) {
+                    // Dùng total_rooms làm giá trị mặc định để Frontend ko bị trống
+                    $cabin->available_rooms = $cabin->total_rooms; 
+                    return $cabin;
+                });
 
-            // Gán lại số phòng available (Tối thiểu là 0 để không bị số âm)
-            $cabin->available_rooms = max(0, $cabin->total_rooms - $bookedRooms);
-            
-            return $cabin;
+            return response()->json([
+                'status' => 'success',
+                'data' => $defaultCabins,
+                'note' => 'Hiển thị theo Total Rooms (Dữ liệu mặc định)'
+            ]);
+        }
+
+        // 3. Map lại dữ liệu CHUẨN từ bảng trung gian
+        $cabins = $schedule->cabin_classes->map(function ($cabin) {
+            return [
+                'id' => $cabin->id,
+                'name' => $cabin->name,
+                'price' => $cabin->price,
+                'capacity' => $cabin->capacity,
+                'description' => $cabin->description,
+                'total_rooms' => $cabin->total_rooms,
+                
+                // 🎯 ĐÂY LÀ GIÁ TRỊ VÀNG: Bốc từ Pivot
+                'available_rooms' => $cabin->pivot->available_rooms, 
+                
+                'amenities' => $cabin->amenities,
+                'images' => $cabin->images,
+            ];
         });
 
         return response()->json([
