@@ -74,7 +74,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/cabins', [AdminController::class, 'storeCabin']);       // Thêm mới
         Route::put('/cabins/{id}', [AdminController::class, 'updateCabin']);  // Cập nhật
         Route::delete('/cabins/{id}', [AdminController::class, 'deleteCabin']); // Xóa
-        // API Quản lý Tài khoản
+        Route::get('/dashboard/schedules-health', [AdminController::class, 'getSchedulesHealth']);
         Route::get('/accounts', [AdminController::class, 'getAccounts']);
         Route::post('/accounts', [AdminController::class, 'storeAccount']);
         Route::put('/accounts/{id}', [AdminController::class, 'updateAccount']);

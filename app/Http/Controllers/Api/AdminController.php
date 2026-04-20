@@ -7,6 +7,7 @@ use Illuminate\Http\Request;
 use App\Models\Booking;
 use App\Models\Cruise;
 use App\Models\CabinClass;
+use App\Models\Schedule;
 use Carbon\Carbon;
 
 class AdminController extends Controller
@@ -406,19 +407,93 @@ class AdminController extends Controller
             return response()->json(['status' => 'success']);
         } catch (\Exception $e) { return response()->json(['status' => 'error'], 500); }
     }
-      public function updateBookingStatus(Request $request, $id)
-{
-    $request->validate([
+    public function updateBookingStatus(Request $request, $id)
+    {
+        $request->validate([
         'status' => 'required|in:holding,confirmed,paid,completed,cancelled'
-    ]);
+        ]);
 
-    $booking = Booking::findOrFail($id);
-    $booking->status = $request->status;
-    $booking->save();
+        $booking = Booking::findOrFail($id);
+        $booking->status = $request->status;
+        $booking->save();
 
-    return response()->json([
-        'message' => 'Cập nhật trạng thái thành công',
-        'data' => $booking
-    ]);
-}
+        return response()->json([
+          'message' => 'Cập nhật trạng thái thành công',
+          'data' => $booking
+        ]);
+    }
+    /**
+     * API 1.1: Lấy dữ liệu Sức khỏe Lịch trình (Tồn phòng & Tỷ lệ lấp đầy)
+     */
+    public function getSchedulesHealth()
+    {
+        try {
+            // 1. Lấy các chuyến đi đang mở bán (Từ hôm nay trở đi và chưa hoàn thành/hủy)
+            $schedules = Schedule::with(['cruise', 'cabin_classes'])
+                ->whereDate('departure_date', '>=', now()->toDateString())
+                ->whereNotIn('status', ['cancelled', 'completed'])
+                ->orderBy('departure_date', 'asc') // Chuyến nào bay sớm xếp lên đầu
+                ->get();
+
+            // 2. Map dữ liệu để tính toán các chỉ số cho Admin
+            $healthData = $schedules->map(function ($schedule) {
+                $totalRooms = 0;
+                $availableRooms = 0;
+
+                // 🎯 Lặp qua các hạng phòng của lịch trình này để cộng dồn từ Pivot
+                foreach ($schedule->cabin_classes as $cabin) {
+                    $totalRooms += $cabin->total_rooms;
+                    $availableRooms += $cabin->pivot->available_rooms; // Bốc từ bảng trung gian
+                }
+
+                // Tính số phòng đã có khách cọc/thanh toán
+                $bookedRooms = $totalRooms - $availableRooms;
+
+                // Tính tỷ lệ lấp đầy (%) - Xử lý an toàn để tránh lỗi chia cho 0
+                $occupancyRate = $totalRooms > 0 
+                    ? round(($bookedRooms / $totalRooms) * 100, 2) 
+                    : 0;
+
+               // Đóng gói dữ liệu trả về cho React
+            return [
+                'schedule_id' => $schedule->id,
+                'cruise_name' => $schedule->cruise->name ?? 'Tàu chưa rõ tên',
+                'departure_date' => \Carbon\Carbon::parse($schedule->departure_date)->format('d/m/Y'),
+                'return_date' => \Carbon\Carbon::parse($schedule->return_date)->format('d/m/Y'),
+                'status' => $schedule->status,
+                
+                // Các chỉ số vàng cho Admin:
+                'metrics' => [
+                    'total_rooms' => $totalRooms,
+                    'available_rooms' => $availableRooms,
+                    'booked_rooms' => $bookedRooms,
+                    'occupancy_rate' => $occupancyRate,
+                ],
+
+        
+                'cabin_details' => $schedule->cabin_classes->map(function($cabin) {
+                    return [
+                        'id' => $cabin->id,
+                        'name' => $cabin->name,
+                        'type' => 'Ocean View', // Chỉnh lại theo thiết kế DB của bạn
+                        'pricePerNight' => (float) $cabin->price,
+                        'total_rooms' => $cabin->total_rooms,
+                        'available_rooms' => $cabin->pivot->available_rooms,
+                    ];
+                })->values()
+            ];
+            });
+
+            return response()->json([
+                'status' => 'success',
+                'data' => $healthData
+            ]);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Lỗi khi tính toán tình trạng phòng: ' . $e->getMessage()
+            ], 500);
+        }
+    }
 }
