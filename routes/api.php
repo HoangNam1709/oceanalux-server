@@ -75,6 +75,9 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::put('/cabins/{id}', [AdminController::class, 'updateCabin']);  // Cập nhật
         Route::delete('/cabins/{id}', [AdminController::class, 'deleteCabin']); // Xóa
         Route::get('/dashboard/schedules-health', [AdminController::class, 'getSchedulesHealth']);
+        Route::get('/revenue/export', [AdminController::class, 'exportRevenueExcel']);
+        Route::get('/revenue/stats', [AdminController::class, 'getRevenueStats']);
+        Route::get('/overview/stats', [AdminController::class, 'getOverviewStats']);
         Route::get('/accounts', [AdminController::class, 'getAccounts']);
         Route::post('/accounts', [AdminController::class, 'storeAccount']);
         Route::put('/accounts/{id}', [AdminController::class, 'updateAccount']);

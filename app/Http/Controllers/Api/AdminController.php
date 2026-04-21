@@ -423,7 +423,7 @@ class AdminController extends Controller
         ]);
     }
     /**
-     * API 1.1: Lấy dữ liệu Sức khỏe Lịch trình (Tồn phòng & Tỷ lệ lấp đầy)
+     * API 11: Lấy dữ liệu Tồn phòng & Tỷ lệ lấp đầy
      */
     public function getSchedulesHealth()
     {
@@ -494,6 +494,128 @@ class AdminController extends Controller
                 'status' => 'error',
                 'message' => 'Lỗi khi tính toán tình trạng phòng: ' . $e->getMessage()
             ], 500);
+        }
+    }
+    /**
+     * API 12: Xuất Excel Báo cáo Doanh Thu
+     */
+    public function exportRevenueExcel(Request $request)
+    {
+        $startDate = $request->query('start_date');
+        $endDate = $request->query('end_date');
+
+        $fileName = 'OceanaLux_BaoCaoDoanhThu_' . now()->format('Y_m_d_H_i') . '.xlsx';
+
+        // Gọi Class Export mà chúng ta vừa tạo
+        return (new \App\Exports\RevenueExport($startDate, $endDate))->download($fileName);
+    }
+    public function getRevenueStats(Request $request)
+    {
+        try {
+            $startDate = $request->query('start_date', date('Y-m-01')); 
+            $endDate = $request->query('end_date', date('Y-m-t'));
+            $cruiseId = $request->query('cruise_id', 'all');
+
+            // --- THÊM RÀNG BUỘC LOGIC Ở ĐÂY ---
+            if (strtotime($endDate) < strtotime($startDate)) {
+                throw new \Exception("Lỗi: Ngày kết thúc không được nhỏ hơn ngày bắt đầu.");
+            }
+
+            // 1. TÍNH TOÁN KỲ HIỆN TẠI
+            $currentQuery = Booking::whereIn('status', ['paid', 'completed', 'confirmed']);
+            if ($cruiseId !== 'all') {
+                $currentQuery->whereHas('schedule', function($q) use ($cruiseId) { $q->where('cruise_id', $cruiseId); });
+            }
+
+            $currentTotal = (clone $currentQuery)->whereBetween('created_at', [$startDate.' 00:00:00', $endDate.' 23:59:59'])->sum('total_price');
+            $currentRecognized = (clone $currentQuery)->where('status', 'completed')->whereBetween('created_at', [$startDate.' 00:00:00', $endDate.' 23:59:59'])->sum('total_price');
+            $currentRefund = Booking::where('status', 'cancelled')->whereBetween('created_at', [$startDate.' 00:00:00', $endDate.' 23:59:59'])->sum('total_price');
+
+            // 2. TÍNH TOÁN KỲ TRƯỚC (Để tính % tăng trưởng)
+            $duration = strtotime($endDate) - strtotime($startDate);
+            $prevStartDate = date('Y-m-d', strtotime($startDate) - $duration - 86400);
+            $prevEndDate = date('Y-m-d', strtotime($startDate) - 86400);
+            
+            $prevTotal = (clone $currentQuery)->whereBetween('created_at', [$prevStartDate.' 00:00:00', $prevEndDate.' 23:59:59'])->sum('total_price');
+            $growth = $prevTotal > 0 ? round((($currentTotal - $prevTotal) / $prevTotal) * 100, 1) : 100;
+
+            // 3. CƠ CẤU DOANH THU THEO TÀU (Cho biểu đồ tròn)
+            $cruisesData = Cruise::all()->map(function($cruise) use ($startDate, $endDate) {
+                $revenue = Booking::whereIn('status', ['paid', 'completed', 'confirmed'])
+                    ->whereHas('schedule', function($q) use ($cruise) { $q->where('cruise_id', $cruise->id); })
+                    ->whereBetween('created_at', [$startDate.' 00:00:00', $endDate.' 23:59:59'])
+                    ->sum('total_price');
+                return ['name' => $cruise->name, 'value' => (float)$revenue];
+            })->filter(fn($item) => $item['value'] > 0)->values();
+
+            // 4. BIỂU ĐỒ ĐƯỜNG 12 THÁNG
+            $chartData = [];
+            for ($i = 1; $i <= 12; $i++) {
+                $chartData[] = [
+                    'name' => 'T' . $i,
+                    'total' => (float) (clone $currentQuery)->whereYear('created_at', date('Y', strtotime($startDate)))->whereMonth('created_at', $i)->sum('total_price')
+                ];
+            }
+
+            return response()->json([
+                'status' => 'success',
+                'data' => [
+                    'metrics' => [
+                        'totalCashIn' => (float)$currentTotal,
+                        'recognizedRevenue' => (float)$currentRecognized,
+                        'refundedAmount' => (float)$currentRefund,
+                        'growth' => $growth
+                    ],
+                    'chartData' => $chartData,
+                    'cruisesData' => $cruisesData,
+                    'year' => date('Y', strtotime($startDate))
+                ]
+            ]);
+        } catch (\Exception $e) { return response()->json(['status' => 'error', 'message' => $e->getMessage()], 500); }
+    }
+    /**
+     * Lấy dữ liệu thống kê cho trang Overview
+     */
+    public function getOverviewStats()
+    {
+        try {
+            $currentYear = date('Y');
+            $currentMonth = date('m');
+
+            // 1. Tính toán các chỉ số tổng quan
+            $totalBookings = \App\Models\Booking::count();
+            $confirmedBookings = \App\Models\Booking::whereIn('status', ['confirmed', 'paid', 'completed'])->count();
+            $totalGuests = \App\Models\Booking::whereIn('status', ['confirmed', 'paid', 'completed'])->sum('guests');
+            $totalRevenue = \App\Models\Booking::whereIn('status', ['paid', 'completed'])->sum('total_price');
+
+            // 2. Tính dữ liệu biểu đồ doanh thu của năm hiện tại
+            $monthlyRevenue = [];
+            for ($i = 1; $i <= 12; $i++) {
+                $monthTotal = \App\Models\Booking::whereYear('created_at', $currentYear)
+                    ->whereMonth('created_at', $i)
+                    ->whereIn('status', ['paid', 'completed'])
+                    ->sum('total_price');
+
+                $monthlyRevenue[] = [
+                    'month' => 'Tháng ' . $i,
+                    'value' => (float) $monthTotal
+                ];
+            }
+
+            return response()->json([
+                'status' => 'success',
+                'data' => [
+                    'stats' => [
+                        'totalBookings' => $totalBookings,
+                        'confirmedBookings' => $confirmedBookings,
+                        'totalGuests' => (int) $totalGuests,
+                        'totalRevenue' => (float) $totalRevenue,
+                    ],
+                    'monthlyRevenue' => $monthlyRevenue
+                ]
+            ]);
+        } catch (\Exception $e) {
+            return response()->json(['status' => 'error', 'message' => $e->getMessage()], 500);
         }
     }
 }
