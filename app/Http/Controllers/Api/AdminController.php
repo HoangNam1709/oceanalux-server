@@ -51,7 +51,15 @@ class AdminController extends Controller
      */
     public function getBookings()
     {
-        $bookings = Booking::with(['schedule.cruise', 'details.cabinClass'])
+        //  Thêm withTrashed() để lấy được tên Tàu và Phòng dù đã bị xóa mềm
+        $bookings = Booking::with([
+            'schedule.cruise' => function($query) {
+                $query->withTrashed(); 
+            }, 
+            'details.cabinClass' => function($query) {
+                $query->withTrashed();
+            }
+        ])
             ->orderBy('created_at', 'desc')
             ->get();
 
@@ -88,12 +96,12 @@ class AdminController extends Controller
         ]);
     }
     /**
-     * API 3: Lấy danh sách Du thuyền kèm theo Phòng, Ảnh và Tiện ích
+     * API 3: Lấy danh sách Du thuyền kèm theo Phòng, Ảnh và Tiện ích, lịch trình
      */
     public function getCruises()
     {
         // Gọi dữ liệu Tàu kèm theo các bảng liên quan để tránh lỗi N+1 Query
-        $cruises = Cruise::with(['cabinClasses', 'images', 'amenities'])
+        $cruises = Cruise::with(['cabinClasses', 'images', 'amenities', 'schedules'])
             ->orderBy('created_at', 'desc')
             ->get();
 
@@ -123,7 +131,7 @@ class AdminController extends Controller
                 'description' => $cruise->description ?? '',
                 'facilities' => $facilities,
                 'featured' => $cruise->status === 'active', // Trạng thái active sẽ lên top nổi bật
-                
+                'schedules' => $cruise->schedules,
                 // Map danh sách hạng phòng từ bảng cabin_classes
                 'cabins' => $cruise->cabinClasses->map(function ($cabin) {
                     return [
@@ -239,21 +247,37 @@ class AdminController extends Controller
         }
     }
 
-    /**
-     * API 6: Xóa Du thuyền
+   /**
+     * API 6: Xóa Du thuyền (LOGIC MỚI: Chỉ chặn đơn chưa hoàn thành)
      */
     public function deleteCruise($id)
     {
         try {
             $cruise = Cruise::findOrFail($id);
-            $cruise->delete(); // Xóa khỏi Database
+
+            // TÌM CÁC ĐƠN HÀNG ĐANG "SỐNG" CỦA TÀU NÀY
+            $hasActiveBookings = \App\Models\Booking::whereHas('schedule', function($q) use ($id) {
+                $q->where('cruise_id', $id);
+            })->whereNotIn('status', ['completed', 'cancelled'])->exists();
+
+            if ($hasActiveBookings) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => "Không thể xóa tàu '{$cruise->name}' vì đang có hành khách đặt chỗ chưa hoàn thành chuyến đi. Vui lòng xử lý hết đơn hàng trước khi xóa.",
+                    'code' => 'CRUISE_HAS_ACTIVE_BOOKINGS'
+                ], 400);
+            }
+
+            // An toàn để xóa
+            $cruise->delete();
 
             return response()->json([
                 'status' => 'success',
-                'message' => 'Đã xóa du thuyền thành công'
+                'message' => "Đã xóa du thuyền '{$cruise->name}' thành công!"
             ]);
+            
         } catch (\Exception $e) {
-            return response()->json(['status' => 'error', 'message' => 'Không thể xóa: ' . $e->getMessage()], 500);
+            return response()->json(['status' => 'error', 'message' => 'Lỗi hệ thống: ' . $e->getMessage()], 500);
         }
     }
     /**
@@ -333,10 +357,29 @@ class AdminController extends Controller
     public function deleteCabin($id)
     {
         try {
-            \App\Models\CabinClass::findOrFail($id)->delete();
-            return response()->json(['status' => 'success']);
+            $cabin = \App\Models\CabinClass::findOrFail($id);
+
+            // Tìm các Đơn hàng đang "Sống" có chứa Hạng phòng này
+            $hasActiveBookings = \App\Models\BookingDetail::where('cabin_class_id', $id)
+                ->whereHas('booking', function($q) {
+                    $q->whereNotIn('status', ['completed', 'cancelled']);
+                })->exists();
+
+            if ($hasActiveBookings) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => "Không thể xóa Hạng phòng '{$cabin->name}' vì đang có khách đặt chờ trải nghiệm. Vui lòng đợi khách đi xong hoặc hủy đơn.",
+                    'code' => 'CABIN_HAS_ACTIVE_BOOKINGS'
+                ], 400);
+            }
+
+            // An toàn để xóa
+            $cabin->delete();
+            
+            return response()->json(['status' => 'success', 'message' => 'Đã xóa Hạng phòng thành công.']);
+
         } catch (\Exception $e) {
-            return response()->json(['status' => 'error', 'message' => $e->getMessage()], 500);
+            return response()->json(['status' => 'error', 'message' => 'Lỗi hệ thống: ' . $e->getMessage()], 500);
         }
     }
     /**
@@ -400,12 +443,33 @@ class AdminController extends Controller
         } catch (\Exception $e) { return response()->json(['status' => 'error', 'message' => $e->getMessage()], 500); }
     }
 
+    /**
+     * API 10.x: Xóa Tài khoản (CÓ RÀNG BUỘC)
+     */
     public function deleteAccount($id)
     {
         try {
-            \App\Models\User::findOrFail($id)->delete();
-            return response()->json(['status' => 'success']);
-        } catch (\Exception $e) { return response()->json(['status' => 'error'], 500); }
+            $user = \App\Models\User::findOrFail($id);
+
+            // Kiểm tra xem User này đã từng đặt vé chưa
+            $hasBookings = \App\Models\Booking::where('user_id', $id)->exists();
+
+            if ($hasBookings) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => "Không thể xóa tài khoản '{$user->email}' vì khách hàng này đã có lịch sử giao dịch. Xóa tài khoản sẽ làm hỏng dữ liệu báo cáo.",
+                    'code' => 'USER_HAS_BOOKINGS'
+                ], 400);
+            }
+
+            $user->delete();
+            return response()->json(['status' => 'success', 'message' => 'Đã xóa tài khoản thành công.']);
+
+        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
+            return response()->json(['status' => 'error', 'message' => 'Không tìm thấy Tài khoản này.'], 404);
+        } catch (\Exception $e) {
+            return response()->json(['status' => 'error', 'message' => 'Lỗi hệ thống: ' . $e->getMessage()], 500);
+        }
     }
     public function updateBookingStatus(Request $request, $id)
     {
@@ -540,9 +604,12 @@ class AdminController extends Controller
             $growth = $prevTotal > 0 ? round((($currentTotal - $prevTotal) / $prevTotal) * 100, 1) : 100;
 
             // 3. CƠ CẤU DOANH THU THEO TÀU (Cho biểu đồ tròn)
-            $cruisesData = Cruise::all()->map(function($cruise) use ($startDate, $endDate) {
+            //  Dùng withTrashed() để báo cáo không bỏ sót doanh thu của tàu đã xóa
+            $cruisesData = Cruise::withTrashed()->get()->map(function($cruise) use ($startDate, $endDate) {
                 $revenue = Booking::whereIn('status', ['paid', 'completed', 'confirmed'])
-                    ->whereHas('schedule', function($q) use ($cruise) { $q->where('cruise_id', $cruise->id); })
+                    ->whereHas('schedule', function($q) use ($cruise) { 
+                        $q->where('cruise_id', $cruise->id); 
+                    })
                     ->whereBetween('created_at', [$startDate.' 00:00:00', $endDate.' 23:59:59'])
                     ->sum('total_price');
                 return ['name' => $cruise->name, 'value' => (float)$revenue];
@@ -616,6 +683,169 @@ class AdminController extends Controller
             ]);
         } catch (\Exception $e) {
             return response()->json(['status' => 'error', 'message' => $e->getMessage()], 500);
+        }
+    }
+    public function getSchedules(Request $request)
+    {
+        try {
+            $cruiseId = $request->query('cruise_id');
+
+            $query = Schedule::query();
+
+            // Nếu truyền lên cruise_id thì chỉ lấy lịch trình của tàu đó
+            if ($cruiseId) {
+                $query->where('cruise_id', $cruiseId);
+            }
+
+            // Lấy lịch trình, sắp xếp ngày khởi hành mới nhất lên đầu
+            $schedules = $query->orderBy('departure_date', 'desc')->get();
+
+            return response()->json([
+                'status' => 'success',
+                'data' => $schedules
+            ]);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Lỗi khi tải danh sách lịch trình: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+   /**
+     * API 13: Thêm Lịch trình mới (
+     */
+    public function storeSchedule(Request $request)
+    {
+        try {
+            $cruise = \App\Models\Cruise::findOrFail($request->cruise_id);
+            $departureDate = \Carbon\Carbon::parse($request->departure_date)->startOfDay();
+            $today = \Carbon\Carbon::today();
+
+            //Không được mở bán ở quá khứ
+            if ($departureDate->lt($today)) {
+                return response()->json([
+                    'status' => 'error', 
+                    'message' => 'Rất tiếc! Ngày khởi hành không được nhỏ hơn ngày hôm nay.'
+                ], 400);
+            }
+
+            // Chống trùng lịch trình
+            // Kiểm tra xem con tàu này đã có lịch khởi hành vào đúng ngày này chưa
+            $isDuplicate = Schedule::where('cruise_id', $request->cruise_id)
+                ->whereDate('departure_date', $departureDate->format('Y-m-d'))
+                ->exists();
+
+            if ($isDuplicate) {
+                return response()->json([
+                    'status' => 'error', 
+                    'message' => "Tàu này đã có lịch khởi hành vào ngày " . $departureDate->format('d/m/Y') . ". Vui lòng chọn ngày khác!"
+                ], 400); // Trả về lỗi 400 để React hiển thị màu đỏ
+            }
+
+            //Tự động tính Ngày Về
+            $daysToAdd = max(0, $cruise->duration_days - 1);
+            $returnDate = $departureDate->copy()->addDays($daysToAdd);
+
+            // Xử lý lưu vào Database
+            $schedule = new Schedule();
+            $schedule->cruise_id = $request->cruise_id;
+            $schedule->departure_date = $departureDate; 
+            $schedule->return_date = $returnDate; 
+            $schedule->status = $request->status ?? 'upcoming'; // Lưu mặc định là upcoming
+            $schedule->save();
+
+            // Khởi tạo kho phòng
+            $cabins = \App\Models\CabinClass::where('cruise_id', $request->cruise_id)->get();
+            foreach ($cabins as $cabin) {
+                $schedule->cabin_classes()->attach($cabin->id, [
+                    'available_rooms' => $cabin->total_rooms ?? $cabin->available_rooms ?? 0
+                ]);
+            }
+
+            return response()->json([
+                'status' => 'success', 
+                'message' => 'Đã mở bán Lịch trình mới thành công!',
+                'data' => $schedule->load('cabin_classes') 
+            ]);
+
+        } catch (\Exception $e) {
+            return response()->json(['status' => 'error', 'message' => 'Lỗi khởi tạo lịch trình: ' . $e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * API 14: Cập nhật Lịch trình 
+     */
+    public function updateSchedule(Request $request, $id)
+    {
+        try {
+            $schedule = Schedule::findOrFail($id);
+
+            // KIỂM TRA: Nếu đã có khách đặt, TUYỆT ĐỐI không cho đổi ngày đi/ngày về
+            $hasBookings = \App\Models\Booking::where('schedule_id', $id)->whereNotIn('status', ['cancelled'])->exists();
+            
+            $isChangingDates = ($schedule->departure_date != $request->departure_date) || ($schedule->return_date != $request->return_date);
+
+            if ($hasBookings && $isChangingDates) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Lịch trình này đã có hành khách đặt vé. Bạn không thể thay đổi Ngày đi/Ngày về để tránh ảnh hưởng đến khách hàng. Bạn chỉ có thể cập nhật trạng thái.',
+                ], 400);
+            }
+
+            // Nếu an toàn, tiến hành cập nhật
+            $schedule->departure_date = $request->departure_date;
+            $schedule->return_date = $request->return_date;
+            $schedule->status = $request->status ?? $schedule->status;
+            $schedule->save();
+
+            return response()->json([
+                'status' => 'success', 
+                'message' => 'Cập nhật lịch trình thành công!',
+                'data' => $schedule
+            ]);
+
+        } catch (\Exception $e) {
+            return response()->json(['status' => 'error', 'message' => 'Lỗi cập nhật: ' . $e->getMessage()], 500);
+        }
+    }
+
+   /**
+     * API 15: Xóa Lịch trình
+     */
+    public function deleteSchedule($id)
+    {
+        try {
+            $schedule = Schedule::findOrFail($id);
+
+            $hasActiveBookings = \App\Models\Booking::where('schedule_id', $id)
+                ->whereNotIn('status', ['completed', 'cancelled'])
+                ->exists();
+
+            if ($hasActiveBookings) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => "Không thể xóa Lịch trình ngày " . \Carbon\Carbon::parse($schedule->departure_date)->format('d/m/Y') . " do có hành khách đã đặt vé và chưa hoàn thành chuyến đi.",
+                    'code' => 'SCHEDULE_HAS_ACTIVE_BOOKINGS'
+                ], 400); 
+            }
+
+            $schedule->delete();
+
+            return response()->json([
+                'status' => 'success', 
+                'message' => 'Đã xóa lịch trình thành công!'
+            ]);
+
+        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
+            return response()->json([
+                'status' => 'error', 
+                'message' => 'Lịch trình này không tồn tại hoặc đã bị xóa từ trước!'
+            ], 404); // Trả về mã lỗi 404 Not Found
+            
+        } catch (\Exception $e) {
+            return response()->json(['status' => 'error', 'message' => 'Lỗi hệ thống: ' . $e->getMessage()], 500);
         }
     }
 }

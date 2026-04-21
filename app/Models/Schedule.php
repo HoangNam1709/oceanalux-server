@@ -4,9 +4,10 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Factories\HasFactory; 
+use Illuminate\Database\Eloquent\SoftDeletes;
 class Schedule extends Model
 {
-    use HasFactory;
+    use HasFactory , SoftDeletes;
     public function cruise() 
     {
     return $this->belongsTo(Cruise::class, 'cruise_id');

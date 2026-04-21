@@ -74,6 +74,10 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/cabins', [AdminController::class, 'storeCabin']);       // Thêm mới
         Route::put('/cabins/{id}', [AdminController::class, 'updateCabin']);  // Cập nhật
         Route::delete('/cabins/{id}', [AdminController::class, 'deleteCabin']); // Xóa
+        Route::get('/schedules', [AdminController::class, 'getSchedules']);
+        Route::post('/schedules', [AdminController::class, 'storeSchedule']);
+        Route::put('/schedules/{id}', [AdminController::class, 'updateSchedule']);
+        Route::delete('/schedules/{id}', [AdminController::class, 'deleteSchedule']);
         Route::get('/dashboard/schedules-health', [AdminController::class, 'getSchedulesHealth']);
         Route::get('/revenue/export', [AdminController::class, 'exportRevenueExcel']);
         Route::get('/revenue/stats', [AdminController::class, 'getRevenueStats']);
