@@ -21,44 +21,43 @@ class Booking extends Model
         return $this->belongsTo(Schedule::class, 'schedule_id');
     }
 
-  public function releaseRoom()
+ public function releaseRoom()
     {
-        return DB::transaction(function () {
-            // Bước 1: Khóa đơn hàng để tránh tranh chấp dữ liệu
-            $booking = self::where('id', $this->id)->lockForUpdate()->first();
+        // 1. Ép về chữ thường để chống lỗi viết hoa (Paid -> paid)
+        $currentStatus = strtolower($this->status);
 
-            // Bước 2: Chỉ xử lý nếu đơn đang ở trạng thái 'holding'
-            if (!$booking || $booking->status !== 'holding') {
-                return false; 
-            }
+        // 2. Kiểm tra trạng thái
+        if (!in_array($currentStatus, ['holding', 'confirmed', 'paid'])) {
+            // Log lại để nếu có lỗi mình mở file storage/logs/laravel.log ra xem
+            \Illuminate\Support\Facades\Log::error("Không thể giải phóng phòng. Trạng thái hiện tại: " . $this->status);
+            return false; 
+        }
 
-            // Bước 3: Đổi trạng thái đơn hàng sang 'cancelled' ngay để block các luồng khác
-            $booking->status = 'cancelled';
-            $booking->save();
+        // 3. Hoàn trả số lượng phòng (Dùng increment là an toàn tuyệt đối, không cần lock)
+        foreach ($this->details as $detail) {
+            \Illuminate\Support\Facades\DB::table('cabin_class_schedule')
+                ->where('schedule_id', $this->schedule_id)
+                ->where('cabin_class_id', $detail->cabin_class_id)
+                ->increment('available_rooms', $detail->quantity ?? 1);
+            
+            $newAvailableCount = \Illuminate\Support\Facades\DB::table('cabin_class_schedule')
+                ->where('schedule_id', $this->schedule_id)
+                ->where('cabin_class_id', $detail->cabin_class_id)
+                ->value('available_rooms');
 
-            // Bước 4: Hoàn trả số lượng phòng vào bảng TRUNG GIAN (Pivot)
-            foreach ($booking->details as $detail) {
-                // Tăng số lượng phòng trực tiếp trong bảng pivot dựa trên schedule_id của đơn hàng
-                DB::table('cabin_class_schedule')
-                    ->where('schedule_id', $booking->schedule_id)
-                    ->where('cabin_class_id', $detail->cabin_class_id)
-                    ->increment('available_rooms', $detail->quantity);
-                
-                // Lấy số lượng mới sau khi cộng để bắn Real-time
-                $newAvailableCount = DB::table('cabin_class_schedule')
-                    ->where('schedule_id', $booking->schedule_id)
-                    ->where('cabin_class_id', $detail->cabin_class_id)
-                    ->value('available_rooms');
-
-                // Bắn tín hiệu Real-time cho Frontend (React) nảy số lại
+            // 4. Bắt lỗi Broadcast (Đây chính là nguyên nhân phụ gây lỗi 404)
+            try {
                 broadcast(new \App\Events\RoomReleased(
                     $detail->cabin_class_id, 
-                    $booking->schedule_id, 
+                    $this->schedule_id, 
                     $newAvailableCount
                 ));
+            } catch (\Exception $e) {
+                // Nếu server Socket (Reverb/Pusher) đang tắt, bỏ qua lỗi để khách vẫn hủy được đơn!
+                \Illuminate\Support\Facades\Log::error("Lỗi Socket khi nhả phòng: " . $e->getMessage());
             }
+        }
 
-            return true;
-        });
+        return true;
     }
 }

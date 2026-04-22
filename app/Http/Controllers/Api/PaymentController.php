@@ -156,7 +156,7 @@ class PaymentController extends Controller
                 $booking = Booking::where('booking_code', $realBookingCode)->first();
                 
                 if ($booking != NULL) {
-                    if (round($booking->total_price * 100) == $inputData['vnp_Amount']) {
+                    if ((int)round($booking->total_price * 100) == (int)$inputData['vnp_Amount']) {
                         
                         // FIX 3: Chấp nhận xử lý nếu đơn đang Holding hoặc Cancelled
                         if (in_array($booking->status, ['holding', 'cancelled'])) {
@@ -207,7 +207,8 @@ class PaymentController extends Controller
             return response()->json(['RspCode' => '99', 'Message' => 'Unknown error']);
         }
     }
-     //BƯỚC 3: RETURN URL (Trả về giao diện)
+
+    //BƯỚC 3: RETURN URL (Trả về giao diện React)
     public function vnpayReturn(Request $request)
     {
         $inputData = [];
@@ -239,11 +240,102 @@ class PaymentController extends Controller
         $secureHash = hash_hmac('sha512', $hashData, $cleanSecret);
 
         if (hash_equals($secureHash, $vnp_SecureHash)) {
-            if ($request->vnp_ResponseCode == '00') {
-                return view('payment.success', ['message' => 'Giao dịch thành công!']);
+            
+            // 🚀 BƯỚC QUAN TRỌNG: Lấy mã đơn hàng gốc
+            $vnp_TxnRef = $request->vnp_TxnRef;
+            $realBookingCode = explode('_', $vnp_TxnRef)[0]; 
+            
+            $booking = Booking::where('booking_code', $realBookingCode)->first();
+
+            if (!$booking) {
+                return redirect('http://localhost:5173/dashboard?payment=error');
             }
-            return view('payment.failed', ['message' => 'Giao dịch không thành công hoặc đã bị hủy.']);
+
+            if ($request->vnp_ResponseCode == '00') {
+                // Cập nhật Database ngay tại đây nếu IPN chưa kịp chạy
+                if ($booking->status === 'holding') {
+                    $booking->update([
+                        'status' => 'paid',
+                        'payment_method' => 'vnpay',
+                        'transaction_id' => $request->vnp_TransactionNo,
+                        'hold_expires_at' => null // Xóa hẹn giờ
+                    ]);
+                }
+                // Điều hướng thẳng về Trang Giao dịch Thành công (React)
+                return redirect('http://localhost:5173/checkout/payment/'.$booking->id.'?status=success');
+            }
+            
+            return redirect('http://localhost:5173/checkout/payment/'.$booking->id.'?status=failed');
         }
-        return view('payment.failed', ['message' => 'Chữ ký không hợp lệ!']);
+        
+        return redirect('http://localhost:5173/dashboard?payment=invalid_signature');
     }
+    // Thêm hàm này vào PaymentController
+    public function verifyPayment(Request $request)
+    {
+        $inputData = [];
+        foreach ($request->all() as $key => $value) {
+            if (substr($key, 0, 4) == "vnp_") {
+                $inputData[$key] = $value;
+            }
+        }
+
+        $vnp_SecureHash = $inputData['vnp_SecureHash'] ?? '';
+        unset($inputData['vnp_SecureHash']);
+        unset($inputData['vnp_SecureHashType']);
+        
+        ksort($inputData);
+        $hashData = "";
+        $i = 0;
+        foreach ($inputData as $key => $value) {
+            if ($i == 1) {
+                $hashData .= '&' . urlencode($key) . "=" . urlencode($value);
+            } else {
+                $hashData .= urlencode($key) . "=" . urlencode($value);
+                $i = 1;
+            }
+        }
+
+        $cleanSecret = trim($this->vnp_HashSecret);
+        $secureHash = hash_hmac('sha512', $hashData, $cleanSecret);
+
+        if (hash_equals($secureHash, $vnp_SecureHash)) {
+
+            $vnp_TxnRef = $request->vnp_TxnRef;
+            $realBookingCode = explode('_', $vnp_TxnRef)[0]; 
+            
+            $booking = Booking::where('booking_code', $realBookingCode)->first();
+
+            if (!$booking) {
+                return response()->json(['status' => 'error', 'message' => 'Không tìm thấy đơn hàng']);
+            }
+
+            if ($request->vnp_ResponseCode == '00') {
+                if ($booking->status === 'holding') {
+                    $booking->update([
+                        'status' => 'paid',
+                        'payment_method' => 'vnpay',
+                        'transaction_id' => $request->vnp_TransactionNo,
+                        'hold_expires_at' => null
+                    ]);
+                    $this->sendBookingSuccessMail($booking->id);
+                }
+                return response()->json(['status' => 'success', 'booking_id' => $booking->id]);
+            }
+            return response()->json(['status' => 'failed', 'booking_id' => $booking->id]);
+        }
+        return response()->json(['status' => 'error', 'message' => 'Chữ ký bảo mật không hợp lệ']);
+    }
+    private function sendBookingSuccessMail($bookingId)
+{
+    try {
+        $booking = Booking::with(['schedule.cruise', 'details.cabinClass'])->find($bookingId);
+        if ($booking) {
+            Mail::to($booking->customer_email)->send(new BookingSuccessMail($booking));
+            Log::info("Mail success sent to: " . $booking->customer_email);
+        }
+    } catch (\Exception $e) {
+        Log::error("Mail fail: " . $e->getMessage());
+    }
+}
 }

@@ -87,6 +87,9 @@ class AdminController extends Controller
                 
                 'paymentMethod' => strtoupper($booking->payment_method ?? 'CASH'),
                 'bookedDate' => $bookedDate,
+                'cancellation_reason' => $booking->cancellation_reason,
+                'refund_amount' => $booking->refund_amount,
+                'refund_status' => $booking->refund_status,
             ];
         });
 
@@ -845,6 +848,109 @@ class AdminController extends Controller
             ], 404); // Trả về mã lỗi 404 Not Found
             
         } catch (\Exception $e) {
+            return response()->json(['status' => 'error', 'message' => 'Lỗi hệ thống: ' . $e->getMessage()], 500);
+        }
+    }
+    /**
+     * API Admin: Xác nhận đã hoàn tiền cho khách
+     */
+    public function processRefund(Request $request, $id)
+    {
+        try {
+            $booking = \App\Models\Booking::findOrFail($id);
+
+            // Kiểm tra xem đơn có đang chờ hoàn tiền không
+            if ($booking->status !== 'cancelled' || $booking->refund_status !== 'pending') {
+                return response()->json([
+                    'status' => 'error', 
+                    'message' => 'Đơn hàng này không trong trạng thái chờ hoàn tiền!'
+                ], 400);
+            }
+
+            // Kế toán có thể lưu lại Mã giao dịch ngân hàng vào cột note/reason nếu cần
+            if ($request->has('admin_note')) {
+                $booking->cancellation_reason = $booking->cancellation_reason . "\n[Kế toán]: " . $request->admin_note;
+            }
+
+            // Chuyển trạng thái sang đã hoàn
+            $booking->refund_status = 'refund';
+            $booking->save();
+
+            return response()->json([
+                'status' => 'success',
+                'message' => 'Đã xác nhận hoàn tiền cho đơn hàng ' . $booking->booking_code
+            ]);
+
+        } catch (\Exception $e) {
+            return response()->json(['status' => 'error', 'message' => 'Lỗi hệ thống: ' . $e->getMessage()], 500);
+        }
+    }
+    /**
+     * API ADMIN: Xử lý Hủy đơn & Chuyển sang chờ hoàn tiền
+     */
+    public function cancelAndRefundBooking(Request $request, $id)
+    {
+        try {
+            \Illuminate\Support\Facades\DB::beginTransaction();
+
+            // 1. Tìm đơn hàng (Admin không cần check user_id)
+            $booking = \App\Models\Booking::find($id);
+
+            if (!$booking) {
+                return response()->json(['status' => 'error', 'message' => 'Không tìm thấy đơn hàng!'], 404);
+            }
+
+            // Chỉ xử lý đơn đã thanh toán
+            if ($booking->status !== 'paid') {
+                return response()->json(['status' => 'error', 'message' => 'Chỉ hỗ trợ hủy và hoàn tiền cho đơn đã thanh toán!'], 400);
+            }
+
+            // 2. Logic tính toán tiền hoàn (Chuẩn chính sách)
+            $schedule = \App\Models\Schedule::findOrFail($booking->schedule_id);
+            $daysUntilDeparture = \Carbon\Carbon::today()->diffInDays(\Carbon\Carbon::parse($schedule->departure_date)->startOfDay(), false);
+
+            $totalPrice = $booking->total_price;
+            if ($daysUntilDeparture >= 7) {
+                $refundAmount = $totalPrice; // Hoàn 100%
+                $cancellationFee = 0;
+            } elseif ($daysUntilDeparture >= 3 && $daysUntilDeparture <= 6) {
+                $refundAmount = $totalPrice * 0.5; // Hoàn 50%
+                $cancellationFee = $totalPrice * 0.5;
+            } else {
+                $refundAmount = 0; // Mất trắng
+                $cancellationFee = $totalPrice; 
+            }
+
+            // 3. Admin nhả phòng để bán lại
+            $success = $booking->releaseRoom();
+            if (!$success) {
+                throw new \Exception("Lỗi hệ thống khi giải phóng kho phòng.");
+            }
+
+            // 4. Cập nhật trạng thái
+            $booking->status = 'cancelled';
+            // Gắn mác [Admin] để phân biệt với khách tự hủy
+            $booking->cancellation_reason = "[Admin Xác Nhận Hủy]: " . ($request->reason ?? 'Không có lý do');
+            $booking->cancellation_fee = $cancellationFee;
+            $booking->refund_amount = $refundAmount;
+            $booking->cancelled_at = now();
+            
+            // Nếu có tiền hoàn thì báo cho Kế toán
+            if ($refundAmount > 0) {
+                $booking->refund_status = 'pending'; 
+            }
+            
+            $booking->save();
+
+            \Illuminate\Support\Facades\DB::commit();
+
+            return response()->json([
+                'status' => 'success', 
+                'message' => 'Đã hủy đơn hàng và chuyển sang danh sách chờ hoàn tiền!'
+            ]);
+
+        } catch (\Exception $e) {
+            \Illuminate\Support\Facades\DB::rollBack();
             return response()->json(['status' => 'error', 'message' => 'Lỗi hệ thống: ' . $e->getMessage()], 500);
         }
     }

@@ -2,41 +2,56 @@
 
 use Illuminate\Http\Request; 
 use Illuminate\Support\Facades\Route;
+
+// --- NHẬP CÁC CONTROLLER ---
+use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\CruiseController;
 use App\Http\Controllers\Api\BookingController;
 use App\Http\Controllers\Api\PaymentController;
-use App\Http\Controllers\Api\AuthController;
-use App\Http\Controllers\Api\AdminController; 
 use App\Http\Controllers\Api\ReviewController;
+use App\Http\Controllers\Api\AdminController; 
+
+// Test gửi Mail
 use App\Models\Booking;
 use Illuminate\Support\Facades\Mail;
 use App\Mail\BookingSuccessMail;
 
-
-//CÁC ROUTE PUBLIC (KHÔNG CẦN ĐĂNG NHẬP)
-
-Route::post('/login', [AuthController::class, 'login']);
-Route::post('/register', [AuthController::class, 'register']);
-Route::post('/send-otp', [AuthController::class, 'sendOtp']);
-Route::post('/verify-and-process', [AuthController::class, 'verifyAndProcess']);
-Route::get('/cruises', [CruiseController::class, 'index']);
-Route::get('/cruises/{id}', [CruiseController::class, 'show']);
-Route::get('/schedules/{id}/available-cabins', [CruiseController::class, 'getAvailableCabins']);
-// VNPAY IPN (Bắt buộc phải Public để Server VNPay có thể gửi kết quả về)
-Route::get('/payment/vnpay-ipn', [PaymentController::class, 'vnpayIpn']);
-
-// Test gửi Mail
 Route::get('/test-mail', function () {
     $booking = Booking::with(['schedule.cruise', 'details.cabinClass'])->first();
     Mail::to('hoangnam170924@gmail.com')->send(new BookingSuccessMail($booking));
     return "Xong! Kiểm tra hòm thư của bạn đi.";
 });
 
-// CÁC ROUTE PROTECTED (BẮT BUỘC ĐĂNG NHẬP BẰNG TOKEN)
+
+// ==============================================================================
+// 1. CÁC API PUBLIC (KHÔNG CẦN ĐĂNG NHẬP)
+// ==============================================================================
+
+// --- XÁC THỰC (AUTH) ---
+Route::post('/login', [AuthController::class, 'login']);
+Route::post('/register', [AuthController::class, 'register']);
+Route::post('/send-otp', [AuthController::class, 'sendOtp']);
+Route::post('/verify-and-process', [AuthController::class, 'verifyAndProcess']);
+
+// --- DU THUYỀN & TÌM KIẾM ---
+Route::get('/cruises', [CruiseController::class, 'index']);
+Route::get('/cruises/{id}', [CruiseController::class, 'show']);
+Route::get('/schedules/{id}/available-cabins', [CruiseController::class, 'getAvailableCabins']);
+
+// --- THANH TOÁN VNPAY (WEBHOOK/VERIFY) ---
+// Gọi ngầm từ Server VNPay
+Route::get('/payment/vnpay-ipn', [PaymentController::class, 'vnpayIpn']);
+// Gọi từ Frontend React sau khi VNPAY chuyển hướng về
+Route::get('/payment/verify', [PaymentController::class, 'verifyPayment']);
+
+
+// ==============================================================================
+// 2. CÁC API BẢO MẬT (YÊU CẦU PHẢI CÓ TOKEN SANCTUM)
+// ==============================================================================
 
 Route::middleware('auth:sanctum')->group(function () {
 
-    // KHU VỰC CỦA NGƯỜI DÙNG (USER)
+    // --- TÀI KHOẢN USER ---
     Route::get('/user', function (Request $request) {
         return response()->json([
             'status' => 'success',
@@ -44,48 +59,66 @@ Route::middleware('auth:sanctum')->group(function () {
         ]);
     });
     Route::put('/user/profile', [AuthController::class, 'updateProfile']);
-    Route::post('/logout', [AuthController::class, 'logout']); // Route Đăng xuất an toàn
+    Route::post('/logout', [AuthController::class, 'logout']); 
     
-    // --- Quản lý Đặt phòng của khách ---
+    // --- QUẢN LÝ ĐẶT PHÒNG (GÓC ĐỘ KHÁCH HÀNG) ---
     Route::get('/my-bookings', [BookingController::class, 'myBookings']); 
     Route::get('/bookings/{id}', [BookingController::class, 'show']); 
     Route::post('/bookings/hold', [BookingController::class, 'holdRoom']);
-    Route::post('/bookings/{id}/cancel', [BookingController::class, 'cancelBooking']); // Khách tự hủy đơn
     
-    // --- Thanh toán ---
+    // 🚀 ĐÃ FIX: Hủy đơn chưa thanh toán (Holding)
+    Route::post('/bookings/{id}/cancel-holding', [BookingController::class, 'cancelHoldingBooking']); 
+    // 🚀 ĐÃ FIX: Hủy đơn đã thanh toán & Yêu cầu hoàn tiền (Paid)
+    Route::post('/bookings/{id}/request-refund', [BookingController::class, 'requestRefundBooking']); 
+    
+    // --- KHỞI TẠO THANH TOÁN ---
     Route::post('/payment/create', [PaymentController::class, 'createPayment']);
+    
+    // --- ĐÁNH GIÁ (REVIEW) ---
     Route::post('/reviews', [ReviewController::class, 'store']);
 
 
-    // KHU VỰC CỦA QUẢN TRỊ VIÊN (ADMIN)
+    // ==========================================================================
+    // 3. KHU VỰC CỦA QUẢN TRỊ VIÊN (YÊU CẦU ROLE = ADMIN - NẾU CÓ MIDDLEWARE)
+    // ==========================================================================
     Route::prefix('admin')->group(function () {
-        // Lấy thống kê tổng quan (Dashboard)
-        Route::get('/dashboard/stats', [AdminController::class, 'getDashboardStats']);
-        // Cập nhật trạng thái đơn hàng (Admin xử lý đơn)
-        Route::put('/bookings/{id}/status', [AdminController::class, 'updateBookingStatus']);
-        // Lấy danh sách toàn bộ đơn đặt vé
-        Route::get('/bookings', [AdminController::class, 'getBookings']);
         
-        // Lấy danh sách Du thuyền kèm theo Phòng (ĐÃ ĐƯỢC CHUYỂN VÀO ĐÚNG NHÀ)
+        // --- THỐNG KÊ DASHBOARD ---
+        Route::get('/dashboard/stats', [AdminController::class, 'getDashboardStats']);
+        Route::get('/dashboard/schedules-health', [AdminController::class, 'getSchedulesHealth']);
+        Route::get('/overview/stats', [AdminController::class, 'getOverviewStats']);
+        
+        // --- THỐNG KÊ DOANH THU ---
+        Route::get('/revenue/stats', [AdminController::class, 'getRevenueStats']);
+        Route::get('/revenue/export', [AdminController::class, 'exportRevenueExcel']);
+
+        // --- QUẢN LÝ ĐƠN HÀNG (BOOKING) ---
+        Route::get('/bookings', [AdminController::class, 'getBookings']);
+        Route::put('/bookings/{id}/status', [AdminController::class, 'updateBookingStatus']);
+        Route::post('/bookings/{id}/cancel-refund', [AdminController::class, 'cancelAndRefundBooking']);
+        Route::post('/bookings/{id}/process-refund', [AdminController::class, 'processRefund']);
+        // --- QUẢN LÝ DU THUYỀN (CRUISE) ---
         Route::get('/cruises', [AdminController::class, 'getCruises']);
         Route::post('/cruises', [AdminController::class, 'storeCruise']);
-        Route::put('/cruises/{id}', [AdminController::class, 'updateCruise']); // Cập nhật
-        Route::delete('/cruises/{id}', [AdminController::class, 'deleteCruise']); // Xóa
-        Route::post('/cabins', [AdminController::class, 'storeCabin']);       // Thêm mới
-        Route::put('/cabins/{id}', [AdminController::class, 'updateCabin']);  // Cập nhật
-        Route::delete('/cabins/{id}', [AdminController::class, 'deleteCabin']); // Xóa
+        Route::put('/cruises/{id}', [AdminController::class, 'updateCruise']);
+        Route::delete('/cruises/{id}', [AdminController::class, 'deleteCruise']);
+        
+        // --- QUẢN LÝ HẠNG PHÒNG (CABIN) ---
+        Route::post('/cabins', [AdminController::class, 'storeCabin']);       
+        Route::put('/cabins/{id}', [AdminController::class, 'updateCabin']);  
+        Route::delete('/cabins/{id}', [AdminController::class, 'deleteCabin']); 
+        
+        // --- QUẢN LÝ LỊCH TRÌNH (SCHEDULE) ---
         Route::get('/schedules', [AdminController::class, 'getSchedules']);
         Route::post('/schedules', [AdminController::class, 'storeSchedule']);
         Route::put('/schedules/{id}', [AdminController::class, 'updateSchedule']);
         Route::delete('/schedules/{id}', [AdminController::class, 'deleteSchedule']);
-        Route::get('/dashboard/schedules-health', [AdminController::class, 'getSchedulesHealth']);
-        Route::get('/revenue/export', [AdminController::class, 'exportRevenueExcel']);
-        Route::get('/revenue/stats', [AdminController::class, 'getRevenueStats']);
-        Route::get('/overview/stats', [AdminController::class, 'getOverviewStats']);
+        
+        // --- QUẢN LÝ TÀI KHOẢN (ACCOUNT) ---
         Route::get('/accounts', [AdminController::class, 'getAccounts']);
         Route::post('/accounts', [AdminController::class, 'storeAccount']);
         Route::put('/accounts/{id}', [AdminController::class, 'updateAccount']);
         Route::delete('/accounts/{id}', [AdminController::class, 'deleteAccount']);
+        
     });
-    
 });
