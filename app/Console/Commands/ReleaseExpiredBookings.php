@@ -33,10 +33,10 @@ class ReleaseExpiredBookings extends Command
             try {
                 DB::transaction(function () use ($booking) {
                     
-                    // 👉 CHỐT CHẶN TỬ THẦN 1: Khóa đơn hàng lại và lấy dữ liệu MỚI NHẤT từ DB
+                    // Khóa đơn hàng lại và lấy dữ liệu MỚI NHẤT từ DB
                     $freshBooking = Booking::where('id', $booking->id)->lockForUpdate()->first();
 
-                    // 👉 CHỐT CHẶN TỬ THẦN 2: Nếu trong vài giây qua có ai đó (hoặc luồng khác) đã hủy đơn này rồi -> QUAY XE NGAY!
+                    // Nếu trong vài giây qua có ai đó đã hủy đơn này rồi -> QUAY XE NGAY!
                     if (!$freshBooking || $freshBooking->status !== 'holding') {
                         return; // Bỏ qua, không làm gì cả
                     }
@@ -46,7 +46,7 @@ class ReleaseExpiredBookings extends Command
                     $freshBooking->save();
 
                     // 3. Hoàn trả số lượng phòng an toàn VÀO BẢNG TRUNG GIAN
-foreach ($freshBooking->details as $detail) {
+        foreach ($freshBooking->details as $detail) {
     
     // Tăng số lượng phòng trực tiếp trong bảng pivot dựa trên schedule_id và cabin_class_id
     DB::table('cabin_class_schedule')

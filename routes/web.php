@@ -15,7 +15,7 @@ Route::get('/test-push/{id}', function($id) {
 // 1. Nút bấm thanh toán gọi vào đây để lấy Link
 Route::post('/payment/vnpay/{booking_id}', [PaymentController::class, 'createPayment']);
 
-// 2. IPN: Nơi VNPay gọi ngầm về server của bạn (Nhớ loại bỏ CSRF cho route này nếu dùng web.php)
+// 2. IPN: Nơi VNPay gọi ngầm về server 
 Route::get('/payment/vnpay/ipn', [PaymentController::class, 'vnpayIpn']);
 
 // 3. Return URL: Nơi khách hàng được chuyển hướng về sau khi thanh toán trên app ngân hàng

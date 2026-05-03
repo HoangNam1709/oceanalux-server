@@ -23,17 +23,16 @@ class Booking extends Model
 
  public function releaseRoom()
     {
-        // 1. Ép về chữ thường để chống lỗi viết hoa (Paid -> paid)
+        // 1. Ép về chữ thường để chống lỗi viết hoa khi so sánh
         $currentStatus = strtolower($this->status);
 
         // 2. Kiểm tra trạng thái
         if (!in_array($currentStatus, ['holding', 'confirmed', 'paid'])) {
-            // Log lại để nếu có lỗi mình mở file storage/logs/laravel.log ra xem
             \Illuminate\Support\Facades\Log::error("Không thể giải phóng phòng. Trạng thái hiện tại: " . $this->status);
             return false; 
         }
 
-        // 3. Hoàn trả số lượng phòng (Dùng increment là an toàn tuyệt đối, không cần lock)
+        // 3. Hoàn trả số lượng phòng 
         foreach ($this->details as $detail) {
             \Illuminate\Support\Facades\DB::table('cabin_class_schedule')
                 ->where('schedule_id', $this->schedule_id)
@@ -45,7 +44,7 @@ class Booking extends Model
                 ->where('cabin_class_id', $detail->cabin_class_id)
                 ->value('available_rooms');
 
-            // 4. Bắt lỗi Broadcast (Đây chính là nguyên nhân phụ gây lỗi 404)
+            // 4. Bắt lỗi Broadcast 
             try {
                 broadcast(new \App\Events\RoomReleased(
                     $detail->cabin_class_id, 
@@ -53,7 +52,7 @@ class Booking extends Model
                     $newAvailableCount
                 ));
             } catch (\Exception $e) {
-                // Nếu server Socket (Reverb/Pusher) đang tắt, bỏ qua lỗi để khách vẫn hủy được đơn!
+                // Nếu server Socket đang tắt, bỏ qua lỗi để khách vẫn hủy được đơn!
                 \Illuminate\Support\Facades\Log::error("Lỗi Socket khi nhả phòng: " . $e->getMessage());
             }
         }

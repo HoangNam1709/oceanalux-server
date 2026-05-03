@@ -8,7 +8,6 @@ use App\Models\CabinClass;
 
 class SyncCabinSchedules extends Command
 {
-    // Để cho giống với lệnh bạn hay gõ, mình giữ nguyên signature cũ của bạn
     protected $signature = 'sync:cabin-schedules';
 
     protected $description = 'Tự động quét và tạo dữ liệu phòng trống dựa trên Total Rooms';

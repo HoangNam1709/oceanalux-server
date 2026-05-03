@@ -3,7 +3,6 @@
 use Illuminate\Http\Request; 
 use Illuminate\Support\Facades\Route;
 
-// --- NHẬP CÁC CONTROLLER ---
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\CruiseController;
 use App\Http\Controllers\Api\BookingController;
@@ -22,10 +21,7 @@ Route::get('/test-mail', function () {
     return "Xong! Kiểm tra hòm thư của bạn đi.";
 });
 
-
-// ==============================================================================
 // 1. CÁC API PUBLIC (KHÔNG CẦN ĐĂNG NHẬP)
-// ==============================================================================
 
 // --- XÁC THỰC (AUTH) ---
 Route::post('/login', [AuthController::class, 'login']);
@@ -44,11 +40,7 @@ Route::get('/payment/vnpay-ipn', [PaymentController::class, 'vnpayIpn']);
 // Gọi từ Frontend React sau khi VNPAY chuyển hướng về
 Route::get('/payment/verify', [PaymentController::class, 'verifyPayment']);
 
-
-// ==============================================================================
 // 2. CÁC API BẢO MẬT (YÊU CẦU PHẢI CÓ TOKEN SANCTUM)
-// ==============================================================================
-
 Route::middleware('auth:sanctum')->group(function () {
 
     // --- TÀI KHOẢN USER ---
@@ -66,21 +58,16 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/bookings/{id}', [BookingController::class, 'show']); 
     Route::post('/bookings/hold', [BookingController::class, 'holdRoom']);
     
-    // 🚀 ĐÃ FIX: Hủy đơn chưa thanh toán (Holding)
+    // Hủy đơn chưa thanh toán (Holding)
     Route::post('/bookings/{id}/cancel-holding', [BookingController::class, 'cancelHoldingBooking']); 
-    // 🚀 ĐÃ FIX: Hủy đơn đã thanh toán & Yêu cầu hoàn tiền (Paid)
-    Route::post('/bookings/{id}/request-refund', [BookingController::class, 'requestRefundBooking']); 
-    
+    // Hủy đơn đã thanh toán & Yêu cầu hoàn tiền (Paid)
+    Route::post('/bookings/{id}/request-refund', [BookingController::class, 'requestRefundBooking']);  
     // --- KHỞI TẠO THANH TOÁN ---
     Route::post('/payment/create', [PaymentController::class, 'createPayment']);
-    
     // --- ĐÁNH GIÁ (REVIEW) ---
     Route::post('/reviews', [ReviewController::class, 'store']);
 
-
-    // ==========================================================================
     // 3. KHU VỰC CỦA QUẢN TRỊ VIÊN (YÊU CẦU ROLE = ADMIN - NẾU CÓ MIDDLEWARE)
-    // ==========================================================================
     Route::prefix('admin')->group(function () {
         
         // --- THỐNG KÊ DASHBOARD ---
