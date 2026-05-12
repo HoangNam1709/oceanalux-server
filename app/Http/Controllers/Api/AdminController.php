@@ -9,10 +9,19 @@ use App\Models\Cruise;
 use App\Models\CabinClass;
 use App\Models\Schedule;
 use Carbon\Carbon;
-
+use App\Models\Amenity;
+use App\Models\User;
+use App\Models\CabinImage;
+use App\Models\CruiseImage;
 class AdminController extends Controller
 {
 
+    public function getAllAmenities()
+    {
+
+        $amenities = Amenity::select('id', 'name')->get();
+        return response()->json(['status' => 'success', 'data' => $amenities]);
+    }
    /**
      * API 1: Lấy số liệu thống kê Tổng quan (Overview Stats)
      */
@@ -98,7 +107,7 @@ class AdminController extends Controller
             'data' => $formattedBookings
         ]);
     }
-    /**
+/**
      * API 3: Lấy danh sách Du thuyền kèm theo Phòng, Ảnh và Tiện ích, lịch trình
      */
     public function getCruises()
@@ -113,8 +122,10 @@ class AdminController extends Controller
             // 1. Tính giá khởi điểm: Lấy giá của hạng phòng rẻ nhất
             $basePrice = $cruise->cabinClasses->min('price') ?? 0;
 
-            // 2. Gom mảng Ảnh từ bảng cruise_images (Giả sử cột chứa link ảnh tên là 'image_url')
-            $images = $cruise->images->pluck('image_url')->toArray();
+            // Thay vì chỉ pluck('image_url')
+$images = $cruise->images->map(function($img) {
+    return ['id' => $img->id, 'image_url' => $img->image_url];
+})->toArray();
 
             // 3. Gom mảng Tiện ích từ bảng cruise_amenities (Giả sử cột chứa tên tiện ích là 'name')
             $facilities = $cruise->amenities->pluck('name')->toArray();
@@ -123,29 +134,33 @@ class AdminController extends Controller
                 'id' => (string) $cruise->id,
                 'name' => $cruise->name,
                 'thumbnail' => $cruise->thumbnail,
-                // Các trường React cần nhưng Database chưa thiết kế -> Dùng giá trị mặc định
-                'destination' => 'Vịnh Hạ Long', 
-                'durationDays' => 3,             
-                'durationNights' => 2,           
+                'destination' => $cruise->destination ?? 'Vịnh Hạ Long', 
+                'durationDays' => (int) ($cruise->duration_days ?? 3),             
+                'durationNights' => (int) ($cruise->duration_nights ?? 2),           
                 
                 'starRating' => (float) ($cruise->star_rating ?? 5),
-                'basePrice' => (float) $basePrice, // Đã tính toán tự động ở trên
-                'images' => $images,
+                'basePrice' => (float) $basePrice, 
+                'images_objects' => $images,
+                'images' => $cruise->images->pluck('image_url')->toArray(), 
                 'description' => $cruise->description ?? '',
-                'facilities' => $facilities,
-                'featured' => $cruise->status === 'active', // Trạng thái active sẽ lên top nổi bật
+                'facilities'  => $facilities,
+                'facilityIds' => $cruise->amenities->pluck('id')->toArray(), 
+                'featured' => $cruise->status === 'active', 
                 'schedules' => $cruise->schedules,
-                // Map danh sách hạng phòng từ bảng cabin_classes
+                
+                // Map danh sách hạng phòng
                 'cabins' => $cruise->cabinClasses->map(function ($cabin) {
                     return [
                         'id' => (string) $cabin->id,
-                        'type' => 'Ocean View', // Mặc định vì DB chưa có loại phòng (Suite, Balcony...)
+                        'type' => 'Ocean View', 
                         'name' => $cabin->name,
                         'pricePerNight' => (float) $cabin->price,
                         'capacity' => (int) $cabin->capacity,
                         'available' => (int) $cabin->available_rooms,
-                        'amenities' => [], // Để trống vì DB chưa có bảng tiện ích riêng cho từng hạng phòng
+                        'amenities' => [], 
                         'imageUrl' => $cabin->image_url ?? '',
+                        'area' => (float) $cabin->area,
+                        'deck' => (int) $cabin->deck,
                     ];
                 })->values()->toArray()
             ];
@@ -156,25 +171,32 @@ class AdminController extends Controller
             'data' => $formattedCruises
         ]);
     }
-    /**
+ /**
      * API 4: Thêm Du thuyền mới vào Database
      */
     public function storeCruise(Request $request)
     {
         try {
-            // 1. Lưu dữ liệu vào DB (Đã thêm 3 trường mới)
             $cruise = new Cruise();
             $cruise->name = $request->name;
             $cruise->thumbnail = $request->thumbnail;
-            $cruise->destination = $request->destination ?? 'Đang cập nhật'; // Điểm đến
-            $cruise->duration_days = $request->durationDays ?? 3;            // Số ngày
-            $cruise->duration_nights = $request->durationNights ?? 2;        // Số đêm
+            $cruise->destination = $request->destination ?? 'Đang cập nhật';
+            $cruise->duration_days = $request->durationDays ?? 3;            
+            $cruise->duration_nights = $request->durationNights ?? 2;        
             $cruise->description = $request->description;
             $cruise->star_rating = $request->starRating ?? 5;
             $cruise->status = $request->status ?? 'active';
             $cruise->save();
+            
+            // Lưu tiện ích vào bảng trung gian
+            if ($request->has('facilityIds')) {
+                $cruise->amenities()->sync($request->facilityIds);
+            }
 
-            // 2. Format dữ liệu TRẢ VỀ ĐÚNG CHUẨN ĐỂ REACT KHÔNG BỊ TRẮNG MÀN HÌNH
+            $cruise->load('amenities');
+            $facilities = $cruise->amenities->pluck('name')->toArray();
+            $facilityIds = $cruise->amenities->pluck('id')->toArray();
+
             $newCruise = [
                 'id' => (string) $cruise->id,
                 'name' => $cruise->name,
@@ -183,12 +205,13 @@ class AdminController extends Controller
                 'durationDays' => (int) $cruise->duration_days,
                 'durationNights' => (int) $cruise->duration_nights,
                 'starRating' => (float) $cruise->star_rating,
-                'basePrice' => 0,   // Giá mặc định bằng 0 vì chưa có phòng
-                'images' => [],     // Bắt buộc phải là mảng rỗng để UI không bị lỗi images[0]
+                'basePrice' => 0,  
+                'images' => [],    
                 'description' => $cruise->description,
-                'facilities' => [], // Bắt buộc phải là mảng rỗng để không bị lỗi map()
                 'featured' => $cruise->status === 'active',
-                'cabins' => []      // Tàu mới tinh chưa có phòng
+                'cabins' => [],      
+                'facilities' => $facilities, 
+                'facilityIds' => $facilityIds 
             ];
 
             return response()->json([
@@ -220,8 +243,15 @@ class AdminController extends Controller
             $cruise->star_rating = $request->starRating;
             $cruise->status = $request->status;
             $cruise->save();
+            
+            if ($request->has('facilityIds')) {
+                $cruise->amenities()->sync($request->facilityIds);
+            }
 
-            // Trả về dữ liệu đã cập nhật để React render lại
+            $cruise->load('amenities');
+            $facilities = $cruise->amenities->pluck('name')->toArray();
+            $facilityIds = $cruise->amenities->pluck('id')->toArray();
+
             $updatedCruise = [
                 'id' => (string) $cruise->id,
                 'name' => $cruise->name,
@@ -230,13 +260,15 @@ class AdminController extends Controller
                 'durationDays' => (int) $cruise->duration_days,
                 'durationNights' => (int) $cruise->duration_nights,
                 'starRating' => (float) $cruise->star_rating,
-                // Lấy giá basePrice hiện tại của tàu (Min của các phòng)
                 'basePrice' => (float) ($cruise->cabinClasses()->min('price') ?? 0),
                 'images' => [], 
                 'description' => $cruise->description,
-                'facilities' => [],
                 'featured' => $cruise->status === 'active',
-                'cabins' => $cruise->cabinClasses // Trả về kèm các phòng hiện có
+                'cabins' => $cruise->cabinClasses, 
+                
+                // 👉 SỬA LẠI: Trả về dữ liệu thật
+                'facilities' => $facilities,
+                'facilityIds' => $facilityIds
             ];
 
             return response()->json([
@@ -249,7 +281,6 @@ class AdminController extends Controller
             return response()->json(['status' => 'error', 'message' => 'Lỗi DB: ' . $e->getMessage()], 500);
         }
     }
-
    /**
      * API 6: Xóa Du thuyền (LOGIC MỚI: Chỉ chặn đơn chưa hoàn thành)
      */
@@ -283,36 +314,49 @@ class AdminController extends Controller
             return response()->json(['status' => 'error', 'message' => 'Lỗi hệ thống: ' . $e->getMessage()], 500);
         }
     }
-    /**
+  /**
      * API 7: Thêm Phòng mới (Cabin)
      */
     public function storeCabin(Request $request)
     {
+        // 1. Validate dữ liệu đầu vào
+        $request->validate([
+            'cruise_id'     => 'required|integer',
+            'name'          => 'required|string|max:255',
+            'pricePerNight' => 'required|numeric|min:0',
+            'capacity'      => 'required|integer|min:1',
+            'available'     => 'required|integer|min:0',
+            'area'          => 'nullable|numeric|min:0',
+            'deck'          => 'nullable|integer|min:1',
+            'imageUrl'      => 'nullable|string',
+            'type'          => 'nullable|string',
+        ]);
+
         try {
             $cabin = new \App\Models\CabinClass();
-            $cabin->cruise_id = $request->cruise_id; // Khóa ngoại nối với Tàu
-            $cabin->name = $request->name;
-            $cabin->area = $request->area ?? 20; // Diện tích phòng, mặc định 20m2 nếu chưa có dữ liệu
-            $cabin->deck = $request->deck ?? 1; // Tầng tàu, mặc định tầng 1 nếu chưa có dữ liệu
-            $cabin->price = $request->pricePerNight;
-            $cabin->capacity = $request->capacity;
-            $cabin->total_rooms = $request->available; 
+            $cabin->cruise_id       = $request->cruise_id; 
+            $cabin->name            = $request->name;
+            $cabin->area            = $request->area ?? 20; 
+            $cabin->deck            = $request->deck ?? 1; 
+            $cabin->price           = $request->pricePerNight;
+            $cabin->capacity        = $request->capacity;
+            $cabin->total_rooms     = $request->available; 
             $cabin->available_rooms = $request->available;
-            $cabin->image_url = $request->imageUrl;
+            $cabin->image_url       = $request->imageUrl;
             $cabin->save();
 
-            // Format lại chuẩn UI
+            // Format lại chuẩn UI cho React
             $newCabin = [
-                'id' => (string) $cabin->id,
-                'type' => $request->type ?? 'Standard',
-                'name' => $cabin->name,
-                'area' => (float) $cabin->area,
-                'deck' => (int) $cabin->deck,
+                'id'            => (string) $cabin->id,
+                'type'          => $request->type ?? 'Standard',
+                'name'          => $cabin->name,
+                'area'          => (float) $cabin->area,
+                'deck'          => (int) $cabin->deck,
                 'pricePerNight' => (float) $cabin->price,
-                'capacity' => (int) $cabin->capacity,
-                'available' => (int) $cabin->available_rooms,
-                'amenities' => [],
-                'imageUrl' => $cabin->image_url ?? '',
+                'capacity'      => (int) $cabin->capacity,
+                'available'     => (int) $cabin->available_rooms,
+                'amenities'     => $request->amenities ?? [], // Trả lại tiện ích từ Request để UI cập nhật ngay
+                'imageUrl'      => $cabin->image_url ?? '',
             ];
 
             return response()->json(['status' => 'success', 'data' => $newCabin]);
@@ -326,26 +370,42 @@ class AdminController extends Controller
      */
     public function updateCabin(Request $request, $id)
     {
+        // 1. Validate dữ liệu đầu vào
+        $request->validate([
+            'name'          => 'required|string|max:255',
+            'pricePerNight' => 'required|numeric|min:0',
+            'capacity'      => 'required|integer|min:1',
+            'available'     => 'required|integer|min:0',
+            'area'          => 'nullable|numeric|min:0',
+            'deck'          => 'nullable|integer|min:1',
+            'imageUrl'      => 'nullable|string',
+            'type'          => 'nullable|string',
+        ]);
+
         try {
             $cabin = \App\Models\CabinClass::findOrFail($id);
-            $cabin->name = $request->name;
-            $cabin->area = $request->area ?? $cabin->area; 
-            $cabin->deck = $request->deck ?? $cabin->deck; 
-            $cabin->price = $request->pricePerNight;
-            $cabin->capacity = $request->capacity;
+            $cabin->name            = $request->name;
+            $cabin->area            = $request->area ?? $cabin->area; 
+            $cabin->deck            = $request->deck ?? $cabin->deck; 
+            $cabin->price           = $request->pricePerNight;
+            $cabin->capacity        = $request->capacity;
             $cabin->available_rooms = $request->available;
-            $cabin->image_url = $request->imageUrl;
+            $cabin->image_url       = $request->imageUrl;
             $cabin->save();
 
+            // SỬA LỖI Ở ĐÂY: Bổ sung area và deck vào dữ liệu trả về
             $updatedCabin = [
-                'id' => (string) $cabin->id,
-                'type' => $request->type ?? 'Standard',
-                'name' => $cabin->name,
+                'id'            => (string) $cabin->id,
+                'type'          => $request->type ?? 'Standard',
+                'name'          => $cabin->name,
+                'area'          => (float) $cabin->area,
+                'deck'          => (int) $cabin->deck,
                 'pricePerNight' => (float) $cabin->price,
-                'capacity' => (int) $cabin->capacity,
-                'available' => (int) $cabin->available_rooms,
-                'amenities' => [],
-                'imageUrl' => $cabin->image_url ?? '',
+                'capacity'      => (int) $cabin->capacity,
+                'available'     => (int) $cabin->available_rooms,
+                'amenities'     => $request->amenities ?? [], // Trả lại tiện ích từ Request
+                'imageUrl'      => $cabin->image_url ?? '',
+                
             ];
 
             return response()->json(['status' => 'success', 'data' => $updatedCabin]);
@@ -355,7 +415,7 @@ class AdminController extends Controller
     }
 
     /**
-     * API 9: Xóa Phòng
+     * API 9: Xóa Phòng (Giữ nguyên logic cực tốt của bạn)
      */
     public function deleteCabin($id)
     {
@@ -953,5 +1013,48 @@ class AdminController extends Controller
             \Illuminate\Support\Facades\DB::rollBack();
             return response()->json(['status' => 'error', 'message' => 'Lỗi hệ thống: ' . $e->getMessage()], 500);
         }
+    }
+    // --- QUẢN LÝ ẢNH (GALLERY) ---
+    public function addGalleryImage(Request $request, $type, $id)
+    {
+        $request->validate(['url' => 'required|string']);
+
+        if ($type === 'cruise') {
+            $image = CruiseImage::create([
+                'cruise_id' => $id,
+                'image_url' => $request->url
+            ]);
+        } else {
+            $image = CabinImage::create([
+                'cabin_class_id' => $id,
+                'image_url' => $request->url
+            ]);
+        }
+
+        return response()->json(['status' => 'success', 'data' => $image]);
+    }
+    public function deleteGalleryImage($type, $imageId)
+    {
+        if ($type === 'cruise') {
+           CruiseImage::destroy($imageId);
+        } else {
+           CabinImage::destroy($imageId);
+        }
+        return response()->json(['status' => 'success', 'message' => 'Đã xóa ảnh']);
+    }
+
+    public function setAsThumbnail(Request $request, $type, $id)
+    {
+        $url = $request->url;
+        if ($type === 'cruise') {
+            $item = Cruise::findOrFail($id);
+            $item->thumbnail = $url;
+        } else {
+            $item = CabinClass::findOrFail($id);
+            $item->image_url = $url;
+        }
+        $item->save();
+
+        return response()->json(['status' => 'success', 'message' => 'Đã cập nhật ảnh bìa']);
     }
 }

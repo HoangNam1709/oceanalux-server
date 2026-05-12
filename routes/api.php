@@ -9,7 +9,7 @@ use App\Http\Controllers\Api\BookingController;
 use App\Http\Controllers\Api\PaymentController;
 use App\Http\Controllers\Api\ReviewController;
 use App\Http\Controllers\Api\AdminController; 
-
+use App\Http\Controllers\Api\CouponController;
 // Test gửi Mail
 use App\Models\Booking;
 use Illuminate\Support\Facades\Mail;
@@ -33,6 +33,7 @@ Route::post('/verify-and-process', [AuthController::class, 'verifyAndProcess']);
 Route::get('/cruises', [CruiseController::class, 'index']);
 Route::get('/cruises/{id}', [CruiseController::class, 'show']);
 Route::get('/schedules/{id}/available-cabins', [CruiseController::class, 'getAvailableCabins']);
+Route::get('/coupons', [CouponController::class, 'index']);
 
 // --- THANH TOÁN VNPAY (WEBHOOK/VERIFY) ---
 // Gọi ngầm từ Server VNPay
@@ -89,7 +90,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/cruises', [AdminController::class, 'storeCruise']);
         Route::put('/cruises/{id}', [AdminController::class, 'updateCruise']);
         Route::delete('/cruises/{id}', [AdminController::class, 'deleteCruise']);
-        
+        Route::get('/amenities', [AdminController::class, 'getAllAmenities']);
         // --- QUẢN LÝ HẠNG PHÒNG (CABIN) ---
         Route::post('/cabins', [AdminController::class, 'storeCabin']);       
         Route::put('/cabins/{id}', [AdminController::class, 'updateCabin']);  
@@ -106,6 +107,11 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/accounts', [AdminController::class, 'storeAccount']);
         Route::put('/accounts/{id}', [AdminController::class, 'updateAccount']);
         Route::delete('/accounts/{id}', [AdminController::class, 'deleteAccount']);
+
+        //--- QUẢN LÝ ẢNH DU THUYỀN & HẠNG PHÒNG ---
+        Route::post('/{type}/{id}/images', [AdminController::class, 'addGalleryImage']);
+        Route::delete('/{type}/images/{imageId}', [AdminController::class, 'deleteGalleryImage']);
+        Route::patch('/{type}/{id}/set-thumbnail', [AdminController::class, 'setAsThumbnail']);
         
     });
 });
