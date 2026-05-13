@@ -227,9 +227,7 @@ class BookingController extends Controller
             return response()->json(['status' => 'error', 'message' => 'Lỗi: ' . $e->getMessage()], 500);
         }
     }
-/**
-     * API 2: HỦY ĐƠN PAID & YÊU CẦU HOÀN TIỀN
-     */
+
     public function requestRefundBooking(Request $request, $id)
     {
         try {
@@ -257,8 +255,8 @@ class BookingController extends Controller
 
             $totalPrice = $booking->total_price;
             if ($daysUntilDeparture >= 7) {
-                $refundAmount = $totalPrice; 
-                $cancellationFee = 0;
+                $refundAmount = $totalPrice * 0.75;
+                $cancellationFee = $totalPrice * 0.25;
             } elseif ($daysUntilDeparture >= 3 && $daysUntilDeparture <= 6) {
                 $refundAmount = $totalPrice * 0.5; 
                 $cancellationFee = $totalPrice * 0.5;

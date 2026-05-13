@@ -79,18 +79,24 @@ Route::middleware('auth:sanctum')->group(function () {
         // --- THỐNG KÊ DOANH THU ---
         Route::get('/revenue/stats', [AdminController::class, 'getRevenueStats']);
         Route::get('/revenue/export', [AdminController::class, 'exportRevenueExcel']);
-
+       
         // --- QUẢN LÝ ĐƠN HÀNG (BOOKING) ---
         Route::get('/bookings', [AdminController::class, 'getBookings']);
         Route::put('/bookings/{id}/status', [AdminController::class, 'updateBookingStatus']);
         Route::post('/bookings/{id}/cancel-refund', [AdminController::class, 'cancelAndRefundBooking']);
         Route::post('/bookings/{id}/process-refund', [AdminController::class, 'processRefund']);
+        Route::get('/bookings/{id}/cancel-refund', [AdminController::class, 'cancelRefundRequest']);
+        Route::post('/bookings/{id}/reject-refund', [AdminController::class, 'cancelRefundRequest']);
         // --- QUẢN LÝ DU THUYỀN (CRUISE) ---
         Route::get('/cruises', [AdminController::class, 'getCruises']);
         Route::post('/cruises', [AdminController::class, 'storeCruise']);
         Route::put('/cruises/{id}', [AdminController::class, 'updateCruise']);
         Route::delete('/cruises/{id}', [AdminController::class, 'deleteCruise']);
         Route::get('/amenities', [AdminController::class, 'getAllAmenities']);
+        // CÁC ROUTE QUẢN LÝ LỊCH TRÌNH CHI TIẾT (Nên đặt cùng chỗ với route của cruises/cabins)
+        Route::post('/itineraries', [AdminController::class, 'storeItinerary']);
+        Route::put('/itineraries/{id}', [AdminController::class, 'updateItinerary']);
+        Route::delete('/itineraries/{id}', [AdminController::class, 'deleteItinerary']);
         // --- QUẢN LÝ HẠNG PHÒNG (CABIN) ---
         Route::post('/cabins', [AdminController::class, 'storeCabin']);       
         Route::put('/cabins/{id}', [AdminController::class, 'updateCabin']);  
