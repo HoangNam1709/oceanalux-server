@@ -14,6 +14,7 @@ use App\Models\User;
 use App\Models\CabinImage;
 use App\Models\CruiseImage;
 use App\Models\BookingDetail;
+use App\Models\Holiday;
 use Carbon\Carbon;
 
 class AdminController extends Controller
@@ -662,6 +663,8 @@ class AdminController extends Controller
             $schedule->departure_date = $departureDate;
             $schedule->return_date = $returnDate;
             $schedule->status = $request->status ?? 'upcoming';
+            $schedule->holiday_id = $request->holiday_id ?? null;
+            $schedule->price_factor = $request->price_factor ?? 1.00;
             $schedule->save();
 
             $cabins = CabinClass::where('cruise_id', $request->cruise_id)->get();
@@ -691,6 +694,8 @@ class AdminController extends Controller
             $schedule->departure_date = $request->departure_date;
             $schedule->return_date = $request->return_date;
             $schedule->status = $request->status ?? $schedule->status;
+            if ($request->has('holiday_id')) $schedule->holiday_id = $request->holiday_id;
+            if ($request->has('price_factor')) $schedule->price_factor = $request->price_factor;
             $schedule->save();
 
             return response()->json(['status' => 'success', 'message' => 'Cập nhật thành công!', 'data' => $schedule]);
@@ -944,8 +949,6 @@ class AdminController extends Controller
             // Lưu mảng JSON vào DB
             $itinerary->activities = json_encode($request->activities ?? []); 
             $itinerary->save();
-
-            // Decode lại để trả về cho Frontend hiển thị
             $itinerary->activities = json_decode($itinerary->activities);
 
             return response()->json(['status' => 'success', 'message' => 'Đã thêm lịch trình ngày mới!', 'data' => $itinerary]);
@@ -1002,6 +1005,108 @@ class AdminController extends Controller
             $itinerary = \App\Models\Itinerary::findOrFail($id);
             $itinerary->delete();
             return response()->json(['status' => 'success', 'message' => 'Đã xóa hoạt động của ngày này!']);
+        } catch (\Exception $e) {
+            return response()->json(['status' => 'error', 'message' => $e->getMessage()], 500);
+        }
+    }
+    // =====================================================================
+    // 10. QUẢN LÝ NGÀY LỄ (HOLIDAYS) & GIÁ ĐỘNG
+    // =====================================================================
+
+    // API Kiểm tra xem ngày khởi hành có trúng ngày lễ không (Gọi khi Admin chọn lịch)
+    public function checkHoliday(Request $request) 
+    {
+        $date = $request->query('date');
+        if (!$date) return response()->json(['is_holiday' => false]);
+
+        $holiday = Holiday::where('is_active', true)
+            ->where('start_date', '<=', $date)
+            ->where('end_date', '>=', $date)
+            ->first();
+
+        if ($holiday) {
+            return response()->json([
+                'is_holiday' => true,
+                'holiday_name' => $holiday->name,
+                'suggested_multiplier' => (float) $holiday->default_multiplier,
+                'holiday_id' => $holiday->id
+            ]);
+        }
+
+        return response()->json(['is_holiday' => false]);
+    }
+
+    // Lấy danh sách ngày lễ
+    public function getHolidays()
+    {
+        try {
+            $holidays = Holiday::orderBy('start_date', 'desc')->get();
+            return response()->json(['status' => 'success', 'data' => $holidays]);
+        } catch (\Exception $e) {
+            return response()->json(['status' => 'error', 'message' => $e->getMessage()], 500);
+        }
+    }
+
+    // Thêm ngày lễ mới
+    public function storeHoliday(Request $request)
+    {
+        $request->validate([
+            'name' => 'required|string|max:255',
+            'start_date' => 'required|date',
+            'end_date' => 'required|date|after_or_equal:start_date',
+            'default_multiplier' => 'required|numeric|min:0.1',
+        ]);
+
+        try {
+            $holiday = Holiday::create([
+                'name' => $request->name,
+                'start_date' => $request->start_date,
+                'end_date' => $request->end_date,
+                'default_multiplier' => $request->default_multiplier,
+                'is_active' => $request->is_active ?? true,
+                'description' => $request->description,
+            ]);
+
+            return response()->json(['status' => 'success', 'message' => 'Đã thêm ngày lễ!', 'data' => $holiday]);
+        } catch (\Exception $e) {
+            return response()->json(['status' => 'error', 'message' => $e->getMessage()], 500);
+        }
+    }
+
+    // Cập nhật ngày lễ
+    public function updateHoliday(Request $request, $id)
+    {
+        $request->validate([
+            'name' => 'required|string|max:255',
+            'start_date' => 'required|date',
+            'end_date' => 'required|date|after_or_equal:start_date',
+            'default_multiplier' => 'required|numeric|min:0.1',
+        ]);
+
+        try {
+            $holiday = Holiday::findOrFail($id);
+            $holiday->update([
+                'name' => $request->name,
+                'start_date' => $request->start_date,
+                'end_date' => $request->end_date,
+                'default_multiplier' => $request->default_multiplier,
+                'is_active' => $request->is_active ?? $holiday->is_active,
+                'description' => $request->description,
+            ]);
+
+            return response()->json(['status' => 'success', 'message' => 'Đã cập nhật ngày lễ!', 'data' => $holiday]);
+        } catch (\Exception $e) {
+            return response()->json(['status' => 'error', 'message' => $e->getMessage()], 500);
+        }
+    }
+
+    // Xóa ngày lễ
+    public function deleteHoliday($id)
+    {
+        try {
+            $holiday = Holiday::findOrFail($id);
+            $holiday->delete();
+            return response()->json(['status' => 'success', 'message' => 'Đã xóa ngày lễ!']);
         } catch (\Exception $e) {
             return response()->json(['status' => 'error', 'message' => $e->getMessage()], 500);
         }

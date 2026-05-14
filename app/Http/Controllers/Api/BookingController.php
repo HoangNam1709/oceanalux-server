@@ -125,9 +125,16 @@ class BookingController extends Controller
                 ], 400);
             }
 
-            // 2. Tính toán giá mới (Phụ thu 15% nếu quá tiêu chuẩn)
-            $priceMultiplier = ($guests > $capacity && $guests <= $capacity + 2) ? 1.15 : 1;
-            $finalCabinPrice = $cabin->price * $priceMultiplier;
+            // 2. TÍNH TOÁN GIÁ MỚI KẾT HỢP HỆ SỐ NGÀY LỄ VÀ SỐ KHÁCH
+            
+            // Lấy hệ số ngày lễ (Mặc định là 1.0 nếu không có)
+            $holidayFactor = $schedule->price_factor ?? 1.00;
+            
+            // Hệ số phụ thu nếu nhồi thêm khách (Vượt capacity)
+            $capacityMultiplier = ($guests > $capacity && $guests <= $capacity + 2) ? 1.15 : 1;
+            
+            // Giá cuối cùng = (Giá gốc x Hệ số Lễ) x Hệ số nhồi khách
+            $finalCabinPrice = ($cabin->price * $holidayFactor) * $capacityMultiplier;
 
             $newAvailableCount = $cabin->pivot->available_rooms - $request->quantity;
             $schedule->cabin_classes()->updateExistingPivot($cabin->id, [

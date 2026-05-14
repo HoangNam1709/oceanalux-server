@@ -44,14 +44,6 @@ class PaymentController extends Controller
             return response()->json(['message' => 'Đơn hàng đã quá hạn giữ chỗ! Vui lòng đặt lại.'], 400);
         }
 
-        // Cập nhật số tiền từ React
-        if ($frontendAmount && $frontendAmount > $booking->total_price) {
-            $booking->update([
-                'total_price' => $frontendAmount
-            ]);
-            $booking = $booking->fresh(); 
-        }
-
         // KIỂM TRA SỐ TIỀN HỢP LỆ
         if ($booking->total_price <= 0) {
             return response()->json(['message' => 'Số tiền thanh toán không hợp lệ.'], 400);

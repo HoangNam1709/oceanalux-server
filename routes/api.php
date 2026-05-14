@@ -106,7 +106,14 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/schedules', [AdminController::class, 'getSchedules']);
         Route::post('/schedules', [AdminController::class, 'storeSchedule']);
         Route::put('/schedules/{id}', [AdminController::class, 'updateSchedule']);
-        Route::delete('/schedules/{id}', [AdminController::class, 'deleteSchedule']);
+        Route::delete('/schedules/{id}', [AdminController::class, 'deleteSchedule']); 
+        
+        // QUẢN LÝ NGÀY LỄ (HOLIDAYS)
+        Route::get('/check-holiday', [AdminController::class, 'checkHoliday']);
+        Route::get('/holidays', [AdminController::class, 'getHolidays']);
+        Route::post('/holidays', [AdminController::class, 'storeHoliday']);
+        Route::put('/holidays/{id}', [AdminController::class, 'updateHoliday']);
+        Route::delete('/holidays/{id}', [AdminController::class, 'deleteHoliday']);
         
         // --- QUẢN LÝ TÀI KHOẢN (ACCOUNT) ---
         Route::get('/accounts', [AdminController::class, 'getAccounts']);

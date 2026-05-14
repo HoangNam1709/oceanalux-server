@@ -8,7 +8,13 @@ use Illuminate\Support\Facades\DB; // Thêm dòng này để dùng Transaction
 class Booking extends Model
 {
     protected $guarded = [];
+    protected $appends = ['is_reviewed'];
 
+    // 🚀 2. Hàm tự động kiểm tra xem đơn này đã có đánh giá trong bảng reviews chưa
+    public function getIsReviewedAttribute()
+    {
+        return \App\Models\Review::where('booking_id', $this->id)->exists();
+    }
     // 1. Mối quan hệ với bảng Chi tiết đặt phòng
     public function details()
     {
@@ -21,7 +27,7 @@ class Booking extends Model
         return $this->belongsTo(Schedule::class, 'schedule_id');
     }
 
- public function releaseRoom()
+    public function releaseRoom()
     {
         // 1. Ép về chữ thường để chống lỗi viết hoa khi so sánh
         $currentStatus = strtolower($this->status);

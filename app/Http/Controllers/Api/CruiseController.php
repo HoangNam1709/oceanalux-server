@@ -72,6 +72,7 @@ class CruiseController extends Controller
             'cabinClasses.amenities',
             'images',
             'reviews.user',
+            'reviews.images',
             'itineraries',
             'schedules' => function($query) {
                 $query->whereDate('departure_date', '>=', now()->toDateString()) 
