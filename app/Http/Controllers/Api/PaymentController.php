@@ -12,8 +12,8 @@ use App\Mail\BookingSuccessMail;
 class PaymentController extends Controller
 {
     // Thông tin tài khoản chuẩn
-    private $vnp_TmnCode = "G5IH7EKY";
-    private $vnp_HashSecret = "S6RMKH4YKVVV9FY9LI4LICUGW9I50NMO";
+    private $vnp_TmnCode = 'XCB5OVV5';
+    private $vnp_HashSecret = 'CU64474XJVU06DJHIS2QVY8QREXTJIA1';
     private $vnp_Url = "https://sandbox.vnpayment.vn/paymentv2/vpcpay.html";
     private $vnp_Returnurl = "http://localhost:5173/payment-result"; 
      //BƯỚC 1: TẠO REQUEST THANH TOÁN
@@ -53,7 +53,7 @@ class PaymentController extends Controller
         $vnp_TxnRef = $booking->booking_code . '_' . time();
         $vnp_OrderInfo = "Thanh_toan_don_hang_" . $booking->booking_code; 
         $vnp_OrderType = 'billpayment';
-        $vnp_Amount = round($booking->total_price * 100); 
+        $vnp_Amount = sprintf('%.0f', $booking->total_price * 100);
         $vnp_Locale = 'vn';
         
         // Chuẩn hóa IP
@@ -160,8 +160,6 @@ class PaymentController extends Controller
                                     'payment_method' => 'vnpay',
                                     'transaction_id' => $inputData['vnp_TransactionNo']
                                 ]);
-
-                                // 👉 GỬI EMAIL XÁC NHẬN NGAY KHI THANH TOÁN XONG
                                 try {
                                     // Lấy đầy đủ data (tàu, cabin) để render ra HTML email không bị lỗi null
                                     $bookingWithDetails = Booking::with(['schedule.cruise', 'details.cabinClass'])->find($booking->id);
