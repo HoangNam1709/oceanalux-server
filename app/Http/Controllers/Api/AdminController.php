@@ -440,50 +440,51 @@ class AdminController extends Controller
         return response()->json(['status' => 'success', 'data' => $amenities]);
     }
 
-  public function getBookings()
-{
-    $bookings = Booking::with([
-        'schedule.cruise' => function($query) { $query->withTrashed(); },
-        'details.cabinClass' => function($query) { $query->withTrashed(); }
-    ])->orderBy('created_at', 'desc')->get();
+    public function getBookings()
+    {
+        $bookings = Booking::with([
+            'schedule.cruise' => function($query) { $query->withTrashed(); },
+            'details.cabinClass' => function($query) { $query->withTrashed(); }
+        ])->orderBy('created_at', 'desc')->get();
 
-    $formattedBookings = $bookings->map(function ($booking) {
-        $departureDate = $booking->schedule ? Carbon::parse($booking->schedule->departure_time)->format('d/m/Y') : 'N/A';
-        // Giả sử tour 3 ngày 2 đêm nên cộng thêm 2 ngày cho ngày về
-        $returnDate = $booking->schedule ? Carbon::parse($booking->schedule->departure_time)->addDays(2)->format('d/m/Y') : 'N/A';
-        $bookedDate = $booking->created_at ? $booking->created_at->format('d/m/Y') : 'N/A';
+        $formattedBookings = $bookings->map(function ($booking) {
+            
+            // 🚀 ĐÃ SỬA: Lấy đúng cột departure_date và return_date từ bảng schedules
+            $departureDate = $booking->schedule ? Carbon::parse($booking->schedule->departure_date)->format('d/m/Y') : 'N/A';
+            $returnDate = $booking->schedule ? Carbon::parse($booking->schedule->return_date)->format('d/m/Y') : 'N/A';
+            $bookedDate = $booking->created_at ? $booking->created_at->format('d/m/Y') : 'N/A';
 
-        // Xác định số tiền hiển thị chính: Nếu đã hủy thì hiện tiền hoàn, còn lại hiện tổng bill
-        $displayAmount = ($booking->status === 'cancelled') 
-            ? (float) $booking->refund_amount 
-            : (float) $booking->total_price;
+            // Xác định số tiền hiển thị chính: Nếu đã hủy thì hiện tiền hoàn, còn lại hiện tổng bill
+            $displayAmount = ($booking->status === 'cancelled') 
+                ? (float) $booking->refund_amount 
+                : (float) $booking->total_price;
 
-        return [
-            'id'                  => (string) $booking->id,
-            'bookingRef'          => $booking->booking_code,
-            'guestName'           => $booking->customer_name,
-            'guestEmail'          => $booking->customer_email,
-            'cruiseName'          => $booking->schedule->cruise->name ?? 'N/A',
-            'departureDate'       => $departureDate,
-            'returnDate'          => $returnDate,
-            'cabinType'           => $booking->details->first()->cabinClass->name ?? 'N/A',
-            'guests'              => $booking->guests ?? 2,
-            'totalAmount'         => $displayAmount, 
-            'originalPrice'       => (float) $booking->total_price, // Dùng để đối chiếu phí phạt
-            'status'              => $booking->status,
-            'paymentMethod'       => strtoupper($booking->payment_method ?? 'CASH'),
-            'bookedDate'          => $bookedDate,
-            'cancellation_reason' => $booking->cancellation_reason,
-            'refund_amount'       => (float) $booking->refund_amount,
-            'refund_status'       => $booking->refund_status,
-        ];
-    });
+            return [
+                'id'                  => (string) $booking->id,
+                'bookingRef'          => $booking->booking_code,
+                'guestName'           => $booking->customer_name,
+                'guestEmail'          => $booking->customer_email,
+                'cruiseName'          => $booking->schedule->cruise->name ?? 'N/A',
+                'departureDate'       => $departureDate,
+                'returnDate'          => $returnDate,
+                'cabinType'           => $booking->details->first()->cabinClass->name ?? 'N/A',
+                'guests'              => $booking->guests ?? 2,
+                'totalAmount'         => $displayAmount, 
+                'originalPrice'       => (float) $booking->total_price, // Dùng để đối chiếu phí phạt
+                'status'              => $booking->status,
+                'paymentMethod'       => strtoupper($booking->payment_method ?? 'CASH'),
+                'bookedDate'          => $bookedDate,
+                'cancellation_reason' => $booking->cancellation_reason,
+                'refund_amount'       => (float) $booking->refund_amount,
+                'refund_status'       => $booking->refund_status,
+            ];
+        });
 
-    return response()->json([
-        'status' => 'success',
-        'data'   => $formattedBookings
-    ]);
-}
+        return response()->json([
+            'status' => 'success',
+            'data'   => $formattedBookings
+        ]);
+    }
 
     public function updateBookingStatus(Request $request, $id)
     {
@@ -722,6 +723,9 @@ class AdminController extends Controller
     {
         try {
             $schedules = Schedule::with(['cruise', 'cabin_classes'])
+            ->whereHas('cruise', function($q) {
+                $q->whereNull('deleted_at'); 
+            })
                 ->whereDate('departure_date', '>=', now()->toDateString())
                 ->whereNotIn('status', ['cancelled', 'completed'])
                 ->orderBy('departure_date', 'asc')
