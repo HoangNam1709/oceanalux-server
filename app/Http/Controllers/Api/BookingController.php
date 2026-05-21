@@ -166,8 +166,7 @@ class BookingController extends Controller
 
             DB::commit();
 
-            // 🚨 PHÁT SỰ KIỆN: Truyền ĐÚNG ID phòng, số lượng MỚI, và ID lịch trình
-            broadcast(new RoomReleased($cabin->id, $request->schedule_id, $newAvailableCount));
+            broadcast(new RoomReleased($cabin->id, $newAvailableCount, $request->schedule_id));
 
             return response()->json([
                 'status' => 'success',
@@ -186,125 +185,173 @@ class BookingController extends Controller
         }
     }
 
-    /**
-     * KHÁCH HÀNG TỰ HỦY ĐƠN
-     */
-    /**
-     * API 1: HỦY ĐƠN HOLDING (Chưa thanh toán)
-     */
-    public function cancelHoldingBooking(Request $request, $id)
-    {
-        try {
-            \Illuminate\Support\Facades\DB::beginTransaction();
+   /**
+ * API 1: HỦY ĐƠN HOLDING (Chưa thanh toán)
+ */
+public function cancelHoldingBooking(Request $request, $id)
+{
+    try {
+        DB::beginTransaction();
 
-            $booking = Booking::where('id', $id)
-                ->where('user_id', auth()->id())
+        $booking = Booking::with('details')
+            ->where('id', $id)
+            ->where('user_id', auth()->id())
+            ->first();
+
+        if (!$booking) {
+            return response()->json(['status' => 'error', 'message' => 'Không tìm thấy đơn hàng!'], 404);
+        }
+
+        if ($booking->status !== 'holding') {
+            return response()->json(['status' => 'error', 'message' => 'Chỉ có thể hủy nhanh đơn đang chờ thanh toán.'], 400);
+        }
+
+        // Lưu lại cabin_class_id và schedule_id trước khi nhả phòng
+        $detail       = $booking->details->first();
+        $cabinClassId = $detail?->cabin_class_id;
+        $scheduleId   = $booking->schedule_id;
+
+        // 1. Nhả phòng về kho
+        $success = $booking->releaseRoom();
+        if (!$success) throw new \Exception("Lỗi hệ thống khi giải phóng kho phòng.");
+
+        // 2. Cập nhật trạng thái đơn
+        $booking->status              = 'cancelled';
+        $booking->cancellation_reason = $request->reason ?? 'Khách hủy ngang (Holding)';
+        $booking->cancellation_fee    = 0;
+        $booking->refund_amount       = 0;
+        $booking->cancelled_at        = now();
+        $booking->save();
+
+        DB::commit();
+
+        // 3. Broadcast realtime — lấy số phòng MỚI sau khi nhả
+        if ($cabinClassId && $scheduleId) {
+            $pivot = DB::table('cabin_class_schedule')
+                ->where('cabin_class_id', $cabinClassId)
+                ->where('schedule_id', $scheduleId)
                 ->first();
 
-            if (!$booking) {
-                return response()->json(['status' => 'error', 'message' => 'Không tìm thấy đơn hàng!'], 404);
+            if ($pivot) {
+                broadcast(new RoomReleased(
+                    $cabinClassId,
+                    $pivot->available_rooms,  // số phòng sau khi +1
+                    $scheduleId
+                ));
             }
-
-            if ($booking->status !== 'holding') {
-                return response()->json(['status' => 'error', 'message' => 'Chỉ có thể hủy nhanh đơn đang chờ thanh toán.'], 400);
-            }
-
-            // 1. Nhả phòng trước
-            $success = $booking->releaseRoom();
-            if (!$success) throw new \Exception("Lỗi hệ thống khi giải phóng kho phòng.");
-
-            // 2. Cập nhật trạng thái
-            $booking->status = 'cancelled';
-            $booking->cancellation_reason = $request->reason ?? 'Khách hủy ngang (Holding)';
-            $booking->cancellation_fee = 0;
-            $booking->refund_amount = 0;
-            $booking->cancelled_at = now();
-            // Không set refund_status vì không liên quan đến tiền
-            $booking->save();
-
-            \Illuminate\Support\Facades\DB::commit();
-
-            return response()->json([
-                'status' => 'success', 
-                'message' => 'Đã hủy đơn nháp và giải phóng phòng thành công!'
-            ]);
-
-        } catch (\Exception $e) {
-            \Illuminate\Support\Facades\DB::rollBack();
-            return response()->json(['status' => 'error', 'message' => 'Lỗi: ' . $e->getMessage()], 500);
         }
+
+        return response()->json([
+            'status'  => 'success',
+            'message' => 'Đã hủy đơn nháp và giải phóng phòng thành công!'
+        ]);
+
+    } catch (\Exception $e) {
+        DB::rollBack();
+        return response()->json(['status' => 'error', 'message' => 'Lỗi: ' . $e->getMessage()], 500);
     }
+}
 
-    public function requestRefundBooking(Request $request, $id)
-    {
-        try {
-            \Illuminate\Support\Facades\DB::beginTransaction();
+/**
+ * API 2: YÊU CẦU HOÀN TIỀN (Đơn đã thanh toán)
+ */
+public function requestRefundBooking(Request $request, $id)
+{
+    try {
+        DB::beginTransaction();
 
-            $booking = Booking::where('id', $id)
-                ->where('user_id', auth()->id())
+        $booking = Booking::with('details')
+            ->where('id', $id)
+            ->where('user_id', auth()->id())
+            ->first();
+
+        if (!$booking) {
+            return response()->json(['status' => 'error', 'message' => 'Không tìm thấy đơn hàng!'], 404);
+        }
+
+        if ($booking->status !== 'paid') {
+            return response()->json(['status' => 'error', 'message' => 'Đơn hàng chưa thanh toán hoặc đã xử lý.'], 400);
+        }
+
+        // Tính số ngày trước khởi hành
+        $schedule            = Schedule::findOrFail($booking->schedule_id);
+        $daysUntilDeparture  = \Carbon\Carbon::today()->diffInDays(
+            \Carbon\Carbon::parse($schedule->departure_date)->startOfDay(),
+            false
+        );
+
+        if ($daysUntilDeparture <= 0) {
+            return response()->json(['status' => 'error', 'message' => 'Tour đã khởi hành, không thể hủy vé!'], 400);
+        }
+
+        // Tính phí phạt theo chính sách
+        $totalPrice = $booking->total_price;
+
+        if ($daysUntilDeparture >= 7) {
+            $refundAmount    = $totalPrice * 0.75;
+            $cancellationFee = $totalPrice * 0.25;
+        } elseif ($daysUntilDeparture >= 3) {
+            $refundAmount    = $totalPrice * 0.5;
+            $cancellationFee = $totalPrice * 0.5;
+        } else {
+            $refundAmount    = 0;
+            $cancellationFee = $totalPrice;
+        }
+
+        // Lưu lại trước khi nhả phòng
+        $detail       = $booking->details->first();
+        $cabinClassId = $detail?->cabin_class_id;
+        $scheduleId   = $booking->schedule_id;
+
+        // 1. Nhả phòng về kho
+        $success = $booking->releaseRoom();
+        if (!$success) throw new \Exception("Lỗi hệ thống khi giải phóng kho phòng.");
+
+        // 2. Cập nhật trạng thái đơn
+        $booking->status              = 'cancelled';
+        $booking->cancellation_reason = $request->reason ?? 'Khách yêu cầu hoàn tiền';
+        $booking->cancellation_fee    = $cancellationFee;
+        $booking->refund_amount       = $refundAmount;
+        $booking->cancelled_at        = now();
+
+        if ($refundAmount > 0) {
+            $booking->refund_status = 'pending'; // Báo hiệu cho Kế toán
+        }
+
+        $booking->save();
+
+        DB::commit();
+
+        // 3. Broadcast realtime — lấy số phòng MỚI sau khi nhả
+        if ($cabinClassId && $scheduleId) {
+            $pivot = DB::table('cabin_class_schedule')
+                ->where('cabin_class_id', $cabinClassId)
+                ->where('schedule_id', $scheduleId)
                 ->first();
 
-            if (!$booking) {
-                return response()->json(['status' => 'error', 'message' => 'Không tìm thấy đơn hàng!'], 404);
+            if ($pivot) {
+                broadcast(new RoomReleased(
+                    $cabinClassId,
+                    $pivot->available_rooms,  // số phòng sau khi +1
+                    $scheduleId
+                ));
             }
-
-            if ($booking->status !== 'paid') {
-                return response()->json(['status' => 'error', 'message' => 'Đơn hàng chưa thanh toán hoặc đã xử lý.'], 400);
-            }
-
-            // 1. Logic tính toán tiền hoàn (Dựa vào ngày khởi hành)
-            $schedule = \App\Models\Schedule::findOrFail($booking->schedule_id);
-            $daysUntilDeparture = \Carbon\Carbon::today()->diffInDays(\Carbon\Carbon::parse($schedule->departure_date)->startOfDay(), false);
-
-            if ($daysUntilDeparture <= 0) {
-                return response()->json(['status' => 'error', 'message' => 'Tour đã khởi hành, không thể hủy vé!'], 400);
-            }
-
-            $totalPrice = $booking->total_price;
-            if ($daysUntilDeparture >= 7) {
-                $refundAmount = $totalPrice * 0.75;
-                $cancellationFee = $totalPrice * 0.25;
-            } elseif ($daysUntilDeparture >= 3 && $daysUntilDeparture <= 6) {
-                $refundAmount = $totalPrice * 0.5; 
-                $cancellationFee = $totalPrice * 0.5;
-            } else {
-                $refundAmount = 0; 
-                $cancellationFee = $totalPrice; 
-            }
-
-            // 2. Nhả phòng cho khách khác mua
-            $success = $booking->releaseRoom();
-            if (!$success) throw new \Exception("Lỗi hệ thống khi giải phóng kho phòng.");
-
-            // 3. Cập nhật trạng thái
-            $booking->status = 'cancelled';
-            $booking->cancellation_reason = $request->reason ?? 'Khách yêu cầu hoàn tiền';
-            $booking->cancellation_fee = $cancellationFee;
-            $booking->refund_amount = $refundAmount;
-            $booking->cancelled_at = now();
-            
-            if ($refundAmount > 0) {
-                $booking->refund_status = 'pending'; // Báo hiệu cho Kế toán
-            }
-            
-            $booking->save();
-
-            \Illuminate\Support\Facades\DB::commit();
-
-            return response()->json([
-                'status' => 'success', 
-                'message' => 'Đã gửi yêu cầu hủy vé thành công!',
-                'data' => [
-                    'refund_amount' => $refundAmount,
-                    'refund_status' => $booking->refund_status
-                ]
-            ]);
-
-        } catch (\Exception $e) {
-            \Illuminate\Support\Facades\DB::rollBack();
-            return response()->json(['status' => 'error', 'message' => 'Lỗi: ' . $e->getMessage()], 500);
         }
+
+        return response()->json([
+            'status'  => 'success',
+            'message' => 'Đã gửi yêu cầu hủy vé thành công!',
+            'data'    => [
+                'refund_amount' => $refundAmount,
+                'refund_status' => $booking->refund_status ?? null,
+            ]
+        ]);
+
+    } catch (\Exception $e) {
+        DB::rollBack();
+        return response()->json(['status' => 'error', 'message' => 'Lỗi: ' . $e->getMessage()], 500);
     }
+}
     /**
      * LẤY DANH SÁCH ĐƠN HÀNG CỦA USER ĐANG ĐĂNG NHẬP
      */
